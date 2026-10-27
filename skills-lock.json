@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "skills": {
+    "audit-prep-assistant": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/building-secure-contracts/skills/audit-prep-assistant/SKILL.md",
+      "computedHash": "7ccc0cf0a7a7f1193bde47da289be6aa2dbfffab63a245323405a1a550719b7c"
+    },
+    "code-maturity-assessor": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/building-secure-contracts/skills/code-maturity-assessor/SKILL.md",
+      "computedHash": "2e55a6b237cd6ce48175b3fc5055a13703a767d740d02838a5dc4488793cf340"
+    },
+    "develop-secure-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/develop-secure-contracts/SKILL.md",
+      "computedHash": "92aa3881d7c5db98ce41670852668cfbe691576284d05d78a72587cdb2760fe8"
+    },
+    "guidelines-advisor": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/building-secure-contracts/skills/guidelines-advisor/SKILL.md",
+      "computedHash": "c5fb81ce2edf98ba17b4e16541ec5ed79069be6986bb099e34c729b34b23ead5"
+    },
+    "migrate-defender-to-cre": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/migrate-defender-to-cre/SKILL.md",
+      "computedHash": "b0299b5fb55063e56a0a50279777646fac394b10c175e96d326f73e2649e67e0"
+    },
+    "review-sui-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/review-sui-contracts/SKILL.md",
+      "computedHash": "6cb0a2310206adef955b3b270c37d098e0af917db7ee0a18930925c5d52013a5"
+    },
+    "secure-workflow-guide": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/building-secure-contracts/skills/secure-workflow-guide/SKILL.md",
+      "computedHash": "d3dcf9545cab5a3836196c6245ef4a47d433e9e4f629a04a78f5e1a7ede70b3e"
+    },
+    "setup-cairo-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup-cairo-contracts/SKILL.md",
+      "computedHash": "0a563050fa22541d76890c862bc02a403e9f8590419a722d145dcf3df5578489"
+    },
+    "setup-solidity-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup-solidity-contracts/SKILL.md",
+      "computedHash": "9c0e45a4afb334c5460811d1c2db5ba7d7756f9e401b250921322c6aab86be64"
+    },
+    "setup-stellar-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup-stellar-contracts/SKILL.md",
+      "computedHash": "ec2c00f94a5cd627d47daca9ae7832bfd32257607548c58dd0954b38db2cb504"
+    },
+    "setup-stylus-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup-stylus-contracts/SKILL.md",
+      "computedHash": "c625fb2aa2a714f7246b6fa4d9a51538ba3640e3034eec3419b8224a01564634"
+    },
+    "setup-sui-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup-sui-contracts/SKILL.md",
+      "computedHash": "055a43a01d05fe08aca4fe96fcb033a1d8d5bc93db0dccc7fff1fb84cd139275"
+    },
+    "token-integration-analyzer": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/building-secure-contracts/skills/token-integration-analyzer/SKILL.md",
+      "computedHash": "44fbccf158e28bae4cfb969847ad46d72e93fe58f82b53a3551646b1c755c8d6"
+    },
+    "upgrade-cairo-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/upgrade-cairo-contracts/SKILL.md",
+      "computedHash": "ca5c23e3c72ec9ba4ffb3919789ae7131f313320600cd8b8c6d2eb09d4e22077"
+    },
+    "upgrade-solidity-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/upgrade-solidity-contracts/SKILL.md",
+      "computedHash": "ef8776be9fd2ee6721f6b6b29992bf6029a6122797b3cec6fe3ce185b22be4ef"
+    },
+    "upgrade-stellar-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/upgrade-stellar-contracts/SKILL.md",
+      "computedHash": "041ffafcfa1d491e3da62d5796638382b864dc3941ba4301d96a8bc37938da4a"
+    },
+    "upgrade-stylus-contracts": {
+      "source": "OpenZeppelin/openzeppelin-skills",
+      "sourceType": "github",
+      "skillPath": "skills/upgrade-stylus-contracts/SKILL.md",
+      "computedHash": "f59350e4bf6f6c44ad14bf7ed69fdd59209238b2ab9ee4f9872affb8400c16e2"
+    }
+  }
+}
