@@ -16,6 +16,7 @@
         "guardian": "0x0000000000000000000000000000000000000000",
         "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         "aavePool": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+        "cctpTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
         "feeTiers": [
           { "name": "Standard", "minAmount": 0, "feeBps": 30 },
           { "name": "Plus", "minAmount": 10000000000, "feeBps": 20 },

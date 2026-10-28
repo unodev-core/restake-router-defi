@@ -235,7 +235,8 @@ contract DepositTest is BaseTest {
         MockERC4626 fotVault = new MockERC4626(fot, 0);
         IRestakeRouter.PoolInit[] memory pools = new IRestakeRouter.PoolInit[](1);
         pools[0] = IRestakeRouter.PoolInit(address(fotVault), IRestakeRouter.PoolType.ERC4626);
-        RestakeRouter r = new RestakeRouter(feeRecipient, guardian, address(fot), address(0), defaultTiers(), pools);
+        RestakeRouter r =
+            new RestakeRouter(feeRecipient, guardian, address(fot), address(0), address(0), defaultTiers(), pools);
 
         fot.mint(alice, 1_000e6);
         vm.prank(alice);

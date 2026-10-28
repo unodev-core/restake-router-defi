@@ -1,6 +1,9 @@
 import { BigInt, Bytes, ethereum } from "@graphprotocol/graph-ts";
 import {
   AllDepositsDisabled,
+  CctpBridged,
+  CctpReceived,
+  CctpRefunded,
   Deposit,
   FeeTiersSet,
   PoolAdded,
@@ -9,6 +12,7 @@ import {
   Withdraw,
 } from "../generated/RestakeRouterV1_0/RestakeRouter";
 import {
+  CctpTransfer,
   DailyPoolStats,
   DepositEvent,
   FeeTier,
@@ -181,7 +185,42 @@ export function handleSwept(event: Swept): void {
   sweep.save();
 }
 
+export function handleCctpReceived(event: CctpReceived): void {
+  const t = newCctpTransfer(event, "IN", event.params.amount);
+  t.remoteDomain = event.params.sourceDomain;
+  t.nonce = event.params.nonce;
+  t.remoteAccount = event.params.messageSender;
+  t.save();
+}
+
+export function handleCctpRefunded(event: CctpRefunded): void {
+  const t = newCctpTransfer(event, "REFUND", event.params.amount);
+  t.account = event.params.to;
+  t.save();
+}
+
+export function handleCctpBridged(event: CctpBridged): void {
+  const p = event.params;
+  const t = newCctpTransfer(event, "OUT", p.amount);
+  t.remoteDomain = p.destinationDomain;
+  t.remoteAccount = p.mintRecipient;
+  t.account = p.sender;
+  t.maxFee = p.maxFee;
+  t.minFinalityThreshold = p.minFinalityThreshold.toI32();
+  t.save();
+}
+
 // ───────────── Loaders ─────────────
+
+function newCctpTransfer(event: ethereum.Event, direction: string, amount: BigInt): CctpTransfer {
+  const t = new CctpTransfer(eventId(event));
+  t.router = getRouter(event).id;
+  t.direction = direction;
+  t.amount = amount;
+  t.timestamp = event.block.timestamp;
+  t.transactionHash = event.transaction.hash;
+  return t;
+}
 
 function eventId(event: ethereum.Event): Bytes {
   return event.transaction.hash.concatI32(event.logIndex.toI32());

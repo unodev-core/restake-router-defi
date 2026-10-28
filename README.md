@@ -28,6 +28,7 @@ The full design rationale is in [docs/architecture-v1.0.md](docs/architecture-v1
 - **"Withdraw all".** Passing `shares = type(uint256).max` withdraws the caller's full balance as read inside the transaction. This matters for rebasing aTokens, where an amount signed in the UI would leave dust.
 - **One-way guardian kill switches.** The guardian can disable deposits for one pool or for all pools. Nobody can re-enable them, and withdrawals can never be blocked.
 - **Permissionless and referral-aware.** Anyone can deposit or withdraw. A `bytes32 referralCode` is emitted with every deposit for off-chain attribution; it doesn't change the fee.
+- **Cross-chain USDC through Circle CCTP V2.** A partner on another chain (e.g. an Arbitrum omnibus) can burn USDC with a deposit hook, and the router mints it on Base and deposits it in the same call (`receiveAndDeposit`). `withdrawAndBridge` redeems on Base and burns the USDC straight to an address on another chain. Same fee schedule, no fee on refunds or withdrawals, and the router still holds nothing between calls.
 - **Same address on every chain.** The router is deployed through CreateX CREATE3 with a permissioned salt, so its address depends only on the deployer and the release label, not on per-chain constructor arguments.
 - **Indexer-ready events.** `Deposit` carries the gross amount, fee, net amount, shares, tier and referral code. The constructor emits the full config (`FeeTiersSet`, `PoolAdded`), so a subgraph can index everything without extra RPC calls.
 
@@ -125,6 +126,34 @@ flowchart TD
     G --> H[Frontend falls back to the YO Gateway<br/>with the user as owner]
 ```
 
+### Cross-chain via CCTP (e.g. Arbitrum omnibus ⇄ Base)
+
+```mermaid
+sequenceDiagram
+    actor P as Partner omnibus (Arbitrum)
+    participant TMA as TokenMessengerV2 (Arbitrum)
+    participant Iris as Circle attestation API
+    actor Rel as Relayer (anyone)
+    participant R as Router (Base)
+    participant MT as MessageTransmitterV2 (Base)
+    participant V as Pool
+
+    P->>TMA: depositForBurnWithHook(amount, 6, router, USDC,<br/>destinationCaller = router, maxFee, finality, hook)
+    Rel->>Iris: fetch message + attestation
+    Rel->>R: receiveAndDeposit(message, attestation)
+    R->>MT: receiveMessage → USDC minted to router
+    Note over R: minted = balance delta<br/>same checks + fee + slippage as deposit()
+    R->>V: deposit(net, hook.receiver)
+    Note over P,V: …later, withdrawing back to Arbitrum…
+    actor O as hook.receiver (Base)
+    O->>R: withdrawAndBridge(pool, shares, minAssets, deadline,<br/>{3, omnibus, maxFee, finality})
+    R->>V: redeem → USDC to router
+    R->>R: depositForBurn(assets) → USDC burned
+    Note over P: relayer calls receiveMessage on Arbitrum → USDC minted to omnibus
+```
+
+`hookData` is `abi.encode(pool, minShares, receiver, deadline, referralCode)`. `destinationCaller` **must** be the router: otherwise anyone can relay the burn without depositing, and the USDC is stranded in the router, where `sweep` sends it to the fee recipient. If a CCTP deposit can't go through, `receiveAndRefund` pays the USDC out on Base to `hook.receiver`, with no fee. The receiver can call it at any time; anyone can call it after the deadline. Full design: [architecture §4.8](docs/architecture-v1.0.md).
+
 ### Fee tiers
 
 The tier is chosen from the gross amount of a single deposit, not a per-user running total. Splitting a deposit into smaller pieces only moves it into a more expensive tier.
@@ -185,7 +214,7 @@ These are checked by the invariant suite in [test/invariant/](test/invariant/):
 2. The router's balance of every token is zero after every user call.
 3. Every fee goes to `FEE_RECIPIENT` and is at most `gross × MAX_FEE_BPS / 10_000`.
 4. No role can block withdrawals.
-5. Every allowance the router has granted to a vault or the Aave Pool is 0 after each call.
+5. Every allowance the router has granted to a vault, the Aave Pool or the CCTP TokenMessenger is 0 after each call.
 6. The pool list and fee tiers never change after construction.
 
 ---
@@ -198,6 +227,8 @@ These are checked by the invariant suite in [test/invariant/](test/invariant/):
 | AUTO baseUSD | The Autopool's `previewRedeem` changes state internally, so it reverts through the router's read-only `previewWithdraw`. Quote it by `eth_call`ing the vault's `previewRedeem` directly, and size `minAssets` with a tolerance. |
 | Veranta avUSDC | Charges about a 1.48% exit fee (`previewRedeem` < `convertToAssets`). Show it to the user. |
 | YO yoUSD | If a withdrawal reverts with `SlippageExceeded(0, …)`, the vault lacks idle liquidity. Fall back to the YO Gateway. |
+| CCTP deposits | Set `destinationCaller = mintRecipient = router`. Size `minShares` from `amount − maxFee − router fee`, and give `deadline` enough slack for attestation: seconds for fast transfers, ~15–20 min for standard ones. |
+| CCTP withdrawals | The share owner on Base calls `withdrawAndBridge`. The destination needs a relayer (or the recipient) to call `receiveMessage` there; `destinationCaller` is 0. |
 | Aave aBasUSDC | For a full exit, pass `shares = max` and approve a buffer (or `max`), because the balance grows every block. |
 
 ---
@@ -208,7 +239,7 @@ These are checked by the invariant suite in [test/invariant/](test/invariant/):
 |---|---|
 | [src/RestakeRouter.sol](src/RestakeRouter.sol) | The router |
 | [src/libraries/FeeLib.sol](src/libraries/FeeLib.sol) | Tier validation, lookup and fee math (pure) |
-| [src/interfaces/](src/interfaces/) | `IRestakeRouter`, `IAaveV3Pool`, `IAToken`, `ICreateX` |
+| [src/interfaces/](src/interfaces/) | `IRestakeRouter`, `IAaveV3Pool`, `IAToken`, `ICreateX`, `ICctpV2` (Circle TokenMessengerV2 / MessageTransmitterV2) |
 | [script/Deploy.s.sol](script/Deploy.s.sol) | CreateX deployment driven by [script/config/constructor-config.v1.json](script/config/constructor-config.v1.json) |
 | [test/unit/](test/unit/) | Mock-based unit and fuzz tests |
 | [test/invariant/](test/invariant/) | Invariant suite (random action sequences) |

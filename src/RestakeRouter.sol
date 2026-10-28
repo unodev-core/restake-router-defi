@@ -9,11 +9,13 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {IRestakeRouter} from "./interfaces/IRestakeRouter.sol";
 import {IAaveV3Pool} from "./interfaces/IAaveV3Pool.sol";
 import {IAToken} from "./interfaces/IAToken.sol";
+import {ITokenMessengerV2, IMessageTransmitterV2} from "./interfaces/ICctpV2.sol";
 import {FeeLib} from "./libraries/FeeLib.sol";
 
 /// @title RestakeRouter
 /// @notice Immutable, ownerless, non-custodial router that deposits USDC into a fixed set of ERC-4626 vaults
-///         and Aave V3 (taking a tiered deposit fee), and withdraws from them (no fee).
+///         and Aave V3 (taking a tiered deposit fee), and withdraws from them (no fee). Optionally receives
+///         deposits from, and bridges withdrawals to, other chains through Circle CCTP V2.
 /// @dev Pool list and fee tiers are written once in the constructor; no code path writes them again.
 ///      The only mutable state is the guardian's one-way deposit kill switches.
 contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
@@ -22,10 +24,22 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     uint16 public constant MAX_FEE_BPS = FeeLib.MAX_FEE_BPS;
     uint256 public constant MAX_TIERS = FeeLib.MAX_TIERS;
 
+    // CCTP V2 MessageV2 / BurnMessageV2 byte offsets, absolute within the message (body starts at 148).
+    uint256 private constant MSG_SOURCE_DOMAIN = 4;
+    uint256 private constant MSG_NONCE = 12;
+    uint256 private constant MSG_RECIPIENT = 76;
+    uint256 private constant MSG_MINT_RECIPIENT = 148 + 36;
+    uint256 private constant MSG_MESSAGE_SENDER = 148 + 100;
+    uint256 private constant MSG_HOOK_DATA = 148 + 228;
+    uint256 private constant HOOK_LENGTH = 5 * 32;
+
     address public immutable FEE_RECIPIENT;
     address public immutable GUARDIAN;
     address public immutable USDC;
     address public immutable AAVE_POOL;
+    address public immutable CCTP_TOKEN_MESSENGER;
+    address public immutable CCTP_MESSAGE_TRANSMITTER;
+    uint32 public immutable CCTP_LOCAL_DOMAIN;
 
     mapping(address pool => PoolType) public poolType;
     mapping(address pool => bool) public depositsDisabled;
@@ -40,11 +54,13 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     }
 
     /// @dev Must not read msg.sender: under CREATE3 it is the CreateX proxy, not the deployer.
+    ///      `cctpTokenMessenger_` is Circle's TokenMessengerV2, or zero to deploy without CCTP support.
     constructor(
         address feeRecipient_,
         address guardian_,
         address usdc_,
         address aavePool_,
+        address cctpTokenMessenger_,
         FeeTier[] memory feeTiers_,
         PoolInit[] memory pools_
     ) {
@@ -56,6 +72,14 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         USDC = usdc_;
         // slither-disable-next-line missing-zero-check zero when the chain has no AAVE_V3 pools (checked per pool)
         AAVE_POOL = aavePool_;
+
+        // slither-disable-next-line missing-zero-check zero deploys without CCTP support
+        CCTP_TOKEN_MESSENGER = cctpTokenMessenger_;
+        address transmitter = cctpTokenMessenger_ == address(0)
+            ? address(0)
+            : ITokenMessengerV2(cctpTokenMessenger_).localMessageTransmitter();
+        CCTP_MESSAGE_TRANSMITTER = transmitter;
+        CCTP_LOCAL_DOMAIN = transmitter == address(0) ? 0 : IMessageTransmitterV2(transmitter).localDomain();
 
         FeeLib.validate(feeTiers_);
         for (uint256 i; i < feeTiers_.length; ++i) {
@@ -86,18 +110,10 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     ) external nonReentrant returns (uint256 shares, uint256 fee) {
         PoolType pType = _checkAction(pool, receiver, deadline);
         if (assets == 0) revert ZeroAmount();
-        if (allDepositsDisabled) revert AllDepositsAreDisabled();
-        if (depositsDisabled[pool]) revert DepositsDisabled(pool);
+        _checkDepositsOpen(pool);
 
         _pullExact(IERC20(USDC), assets);
-        uint8 tierIndex;
-        uint16 feeBps;
-        (fee, tierIndex, feeBps) = _chargeFee(assets);
-
-        shares = _supply(pType, pool, assets - fee, receiver);
-        if (shares < minShares) revert SlippageExceeded(shares, minShares);
-
-        _emitDeposit(receiver, pool, assets, fee, shares, tierIndex, feeBps, referralCode);
+        (shares, fee) = _depositHeld(pType, pool, assets, minShares, receiver, referralCode);
     }
 
     /// @inheritdoc IRestakeRouter
@@ -107,21 +123,99 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         returns (uint256 assets)
     {
         PoolType pType = _checkAction(pool, receiver, deadline);
-        if (minAssets == 0) revert ZeroAmount();
-        if (shares == type(uint256).max) shares = IERC20(pool).balanceOf(msg.sender);
-        // slither-disable-next-line incorrect-equality zero-amount guard
-        if (shares == 0) revert ZeroAmount();
-
-        // Balance delta across the redeem is intended (§9); entry points are nonReentrant.
-        // slither-disable-start reentrancy-balance
-        IERC20 usdc = IERC20(USDC);
-        uint256 receiverBefore = usdc.balanceOf(receiver);
-        shares = pType == PoolType.ERC4626 ? _redeem4626(pool, shares, receiver) : _redeemAave(pool, shares, receiver);
-        assets = usdc.balanceOf(receiver) - receiverBefore;
-        if (assets < minAssets) revert SlippageExceeded(assets, minAssets);
-        // slither-disable-end reentrancy-balance
-
+        (shares, assets) = _withdrawTo(pType, pool, shares, minAssets, receiver);
         emit Withdraw(msg.sender, receiver, pool, USDC, shares, assets);
+    }
+
+    // ───────────── CCTP ─────────────
+
+    /// @inheritdoc IRestakeRouter
+    function receiveAndDeposit(bytes calldata message, bytes calldata attestation)
+        external
+        nonReentrant
+        returns (uint256 shares, uint256 fee)
+    {
+        (uint256 assets,, bytes calldata hookData) = _receiveCctp(message, attestation);
+        (CctpDepositHook memory hook, bool valid) = _decodeHook(hookData);
+        if (!valid) revert InvalidHookData();
+
+        PoolType pType = _checkAction(hook.pool, hook.receiver, hook.deadline);
+        _checkDepositsOpen(hook.pool);
+        (shares, fee) = _depositHeld(pType, hook.pool, assets, hook.minShares, hook.receiver, hook.referralCode);
+    }
+
+    /// @inheritdoc IRestakeRouter
+    function receiveAndRefund(bytes calldata message, bytes calldata attestation)
+        external
+        nonReentrant
+        returns (uint256 amount)
+    {
+        bytes32 messageSender;
+        bytes calldata hookData;
+        (amount, messageSender, hookData) = _receiveCctp(message, attestation);
+        (CctpDepositHook memory hook, bool valid) = _decodeHook(hookData);
+
+        address to;
+        if (valid) {
+            // slither-disable-next-line timestamp user-supplied deadline
+            if (msg.sender != hook.receiver && block.timestamp <= hook.deadline) revert RefundNotAllowed();
+            to = hook.receiver;
+        } else {
+            // Malformed hook: return the funds to the burner's address on this chain (EVM sources only).
+            if (uint256(messageSender) > type(uint160).max) revert InvalidHookData();
+            to = address(uint160(uint256(messageSender)));
+            if (to == address(this)) revert InvalidHookData();
+        }
+        IERC20(USDC).safeTransfer(to, amount);
+        emit CctpRefunded(to, amount);
+    }
+
+    /// @inheritdoc IRestakeRouter
+    function withdrawAndBridge(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        uint256 deadline,
+        CctpBridge calldata bridge
+    ) external nonReentrant returns (uint256 assets) {
+        address tokenMessenger = CCTP_TOKEN_MESSENGER;
+        if (tokenMessenger == address(0)) revert CctpNotSupported();
+        // The router has the same address on every chain (CREATE3): USDC minted to it there would be swept.
+        if (
+            bridge.mintRecipient == bytes32(0) || bridge.mintRecipient == _toBytes32(address(this))
+                || bridge.destinationDomain == CCTP_LOCAL_DOMAIN
+        ) {
+            revert InvalidBridgeDestination();
+        }
+        // slither-disable-next-line timestamp user-supplied deadline
+        if (block.timestamp > deadline) revert DeadlineExpired();
+        PoolType pType = _registeredType(pool);
+
+        (shares, assets) = _withdrawTo(pType, pool, shares, minAssets, address(this));
+
+        IERC20 usdc = IERC20(USDC);
+        usdc.forceApprove(tokenMessenger, assets);
+        ITokenMessengerV2(tokenMessenger)
+            .depositForBurn(
+                assets,
+                bridge.destinationDomain,
+                bridge.mintRecipient,
+                address(usdc),
+                bytes32(0),
+                bridge.maxFee,
+                bridge.minFinalityThreshold
+            );
+        usdc.forceApprove(tokenMessenger, 0);
+
+        emit Withdraw(msg.sender, address(this), pool, USDC, shares, assets);
+        emit CctpBridged(
+            msg.sender,
+            bridge.destinationDomain,
+            bridge.mintRecipient,
+            assets,
+            bridge.maxFee,
+            bridge.minFinalityThreshold
+        );
     }
 
     /// @inheritdoc IRestakeRouter
@@ -207,6 +301,112 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     function _registeredType(address pool) private view returns (PoolType pType) {
         pType = poolType[pool];
         if (pType == PoolType.NONE) revert PoolNotRegistered(pool);
+    }
+
+    function _checkDepositsOpen(address pool) private view {
+        if (allDepositsDisabled) revert AllDepositsAreDisabled();
+        if (depositsDisabled[pool]) revert DepositsDisabled(pool);
+    }
+
+    /// @dev Takes the fee from, and deposits the rest of, `assets` USDC the router already holds.
+    function _depositHeld(
+        PoolType pType,
+        address pool,
+        uint256 assets,
+        uint256 minShares,
+        address receiver,
+        bytes32 referralCode
+    ) private returns (uint256 shares, uint256 fee) {
+        uint8 tierIndex;
+        uint16 feeBps;
+        (fee, tierIndex, feeBps) = _chargeFee(assets);
+
+        shares = _supply(pType, pool, assets - fee, receiver);
+        if (shares < minShares) revert SlippageExceeded(shares, minShares);
+
+        _emitDeposit(receiver, pool, assets, fee, shares, tierIndex, feeBps, referralCode);
+    }
+
+    /// @dev Redeems msg.sender's `shares` (max = full balance) and sends the USDC to `receiver`.
+    ///      Returns the shares spent and the receiver's USDC delta.
+    function _withdrawTo(PoolType pType, address pool, uint256 shares, uint256 minAssets, address receiver)
+        private
+        returns (uint256 spent, uint256 assets)
+    {
+        if (minAssets == 0) revert ZeroAmount();
+        if (shares == type(uint256).max) shares = IERC20(pool).balanceOf(msg.sender);
+        // slither-disable-next-line incorrect-equality zero-amount guard
+        if (shares == 0) revert ZeroAmount();
+
+        // Balance delta across the redeem is intended (§9); entry points are nonReentrant.
+        // slither-disable-start reentrancy-balance
+        IERC20 usdc = IERC20(USDC);
+        uint256 receiverBefore = usdc.balanceOf(receiver);
+        spent = pType == PoolType.ERC4626 ? _redeem4626(pool, shares, receiver) : _redeemAave(pool, shares, receiver);
+        assets = usdc.balanceOf(receiver) - receiverBefore;
+        if (assets < minAssets) revert SlippageExceeded(assets, minAssets);
+        // slither-disable-end reentrancy-balance
+    }
+
+    /// @dev Relays a CCTP V2 burn message minting USDC to this router. Returns the USDC actually minted
+    ///      (balance delta, so the fast-transfer fee is already taken out), the source-chain burner and the
+    ///      hook data.
+    function _receiveCctp(bytes calldata message, bytes calldata attestation)
+        private
+        returns (uint256 amount, bytes32 messageSender, bytes calldata hookData)
+    {
+        address transmitter = CCTP_MESSAGE_TRANSMITTER;
+        if (transmitter == address(0)) revert CctpNotSupported();
+        // The transmitter hands the message to `recipient`: only the local TokenMessenger mints USDC, so any
+        // other recipient would let a forged body pose as a burn.
+        if (
+            message.length < MSG_HOOK_DATA
+                || bytes32(message[MSG_RECIPIENT:MSG_RECIPIENT + 32]) != _toBytes32(CCTP_TOKEN_MESSENGER)
+                || bytes32(message[MSG_MINT_RECIPIENT:MSG_MINT_RECIPIENT + 32]) != _toBytes32(address(this))
+        ) {
+            revert InvalidCctpMessage();
+        }
+
+        // slither-disable-start reentrancy-balance
+        IERC20 usdc = IERC20(USDC);
+        uint256 before = usdc.balanceOf(address(this));
+        if (!IMessageTransmitterV2(transmitter).receiveMessage(message, attestation)) revert InvalidCctpMessage();
+        amount = usdc.balanceOf(address(this)) - before;
+        // slither-disable-end reentrancy-balance
+        // slither-disable-next-line incorrect-equality burn of a token other than USDC
+        if (amount == 0) revert ZeroAmount();
+
+        messageSender = bytes32(message[MSG_MESSAGE_SENDER:MSG_MESSAGE_SENDER + 32]);
+        hookData = message[MSG_HOOK_DATA:];
+        emit CctpReceived(
+            bytes32(message[MSG_NONCE:MSG_NONCE + 32]),
+            uint32(bytes4(message[MSG_SOURCE_DOMAIN:MSG_SOURCE_DOMAIN + 4])),
+            messageSender,
+            amount
+        );
+    }
+
+    /// @dev `valid` is false unless `hookData` is exactly `abi.encode(CctpDepositHook)` with clean address
+    ///      words and a receiver `_checkAction` would accept, so a refund can always pick a destination.
+    function _decodeHook(bytes calldata hookData) private view returns (CctpDepositHook memory hook, bool valid) {
+        if (hookData.length != HOOK_LENGTH) return (hook, valid);
+        (uint256 pool, uint256 minShares, uint256 receiver, uint256 deadline, bytes32 referralCode) =
+            abi.decode(hookData, (uint256, uint256, uint256, uint256, bytes32));
+        if (pool > type(uint160).max || receiver > type(uint160).max) return (hook, valid);
+        hook = CctpDepositHook({
+            // forge-lint: disable-next-line(unsafe-typecast) range-checked above
+            pool: address(uint160(pool)),
+            minShares: minShares,
+            // forge-lint: disable-next-line(unsafe-typecast) range-checked above
+            receiver: address(uint160(receiver)),
+            deadline: deadline,
+            referralCode: referralCode
+        });
+        valid = hook.receiver != address(0) && hook.receiver != address(this) && hook.receiver != hook.pool;
+    }
+
+    function _toBytes32(address a) private pure returns (bytes32) {
+        return bytes32(uint256(uint160(a)));
     }
 
     /// @dev Pulls exactly `amount` of `token` from msg.sender (rejects fee-on-transfer behavior).

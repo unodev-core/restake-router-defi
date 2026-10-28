@@ -99,6 +99,25 @@ type WithdrawEvent @entity(immutable: true) {
   transactionHash: Bytes!
 }
 
+"""
+A CCTP leg through the router. IN: CctpReceived (followed by a Deposit or a REFUND in the same tx).
+REFUND: CctpRefunded. OUT: CctpBridged (preceded by a Withdraw to the router in the same tx).
+"""
+type CctpTransfer @entity(immutable: true) {
+  id: Bytes! # txHash-logIndex
+  router: Router!
+  direction: String! # IN | REFUND | OUT
+  remoteDomain: BigInt # source (IN) or destination (OUT) domain; null for REFUND
+  nonce: Bytes # IN only
+  remoteAccount: Bytes # IN: source-chain burner; OUT: mint recipient (both bytes32)
+  account: Bytes # REFUND: local recipient; OUT: local sender
+  amount: BigInt!
+  maxFee: BigInt # OUT only
+  minFinalityThreshold: Int # OUT only
+  timestamp: BigInt!
+  transactionHash: Bytes!
+}
+
 type SweepEvent @entity(immutable: true) {
   id: Bytes!
   router: Router!

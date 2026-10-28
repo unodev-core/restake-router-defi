@@ -182,6 +182,61 @@ The router has no permit (EIP-2612) entry points. Not every share token supports
 - **Encoding.** The frontend and partners agree on one format, e.g. a short ASCII tag right-padded to 32 bytes, or `keccak256(partnerId)`.
 - **Not on withdrawals.** Withdrawals carry no fee, so there's nothing to attribute.
 
+### 4.8 Cross-chain deposits and withdrawals (CCTP V2)
+
+Partners that hold USDC on another chain (for example an omnibus wallet on Arbitrum) can deposit into a Base pool and get their USDC back on the other chain without a manual bridge step. The router integrates Circle **CCTP V2** directly: native USDC is burned on one chain and minted on the other, with no wrapped asset and no liquidity pool in between.
+
+The CCTP addresses are `immutable`: `CCTP_TOKEN_MESSENGER` comes from the constructor, while `CCTP_MESSAGE_TRANSMITTER` and `CCTP_LOCAL_DOMAIN` are read from it during construction. Passing `address(0)` deploys the router without CCTP; all three entry points then revert with `CctpNotSupported()`.
+
+| | Base mainnet | Arbitrum One |
+|---|---|---|
+| `TokenMessengerV2` | `0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d` | same |
+| `MessageTransmitterV2` | `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64` | same |
+| CCTP domain | `6` | `3` |
+
+#### Inbound: other chain → Base deposit
+
+1. **Source chain.** The partner calls `TokenMessengerV2.depositForBurnWithHook` with:
+   - `destinationDomain = 6` (Base)
+   - `mintRecipient = bytes32(router)`
+   - `destinationCaller = bytes32(router)`
+   - `hookData = abi.encode(CctpDepositHook{pool, minShares, receiver, deadline, referralCode})`, exactly 160 bytes
+   - `maxFee` / `minFinalityThreshold`: 1000 for fast or 2000 for standard finality
+2. **Attestation.** A relayer (our backend, or anyone) fetches the attestation from Circle's Iris API.
+3. **Base.** The relayer calls `router.receiveAndDeposit(message, attestation)`. The router:
+   - checks that the message's `recipient` is the local TokenMessenger and its `mintRecipient` is the router;
+   - calls `MessageTransmitterV2.receiveMessage`;
+   - measures the USDC it actually received as a **balance delta**, net of any fast-transfer fee;
+   - decodes the hook and runs the same checks and code path as `deposit`: deadline, receiver, pool registered, kill switches, tiered fee on the minted amount, `minShares`;
+   - emits `CctpReceived` and then `Deposit`. The `Deposit` event's `sender` is the relayer; the source-chain burner is `CctpReceived.messageSender`.
+
+Any failure reverts the whole call, including `receiveMessage`. The CCTP nonce stays unused, so the message can be relayed again. If the deposit can never succeed (the pool's deposits are disabled, the deadline has passed, or the hook is invalid), `receiveAndRefund(message, attestation)` mints the USDC and sends it on Base, **with no fee**:
+
+| Hook | Who can call | USDC goes to |
+|---|---|---|
+| Valid | `hook.receiver` at any time; anyone after `hook.deadline` | `hook.receiver` |
+| Malformed (wrong length, dirty address words, receiver zero / router / pool) | Anyone | `messageSender` read as an address on Base (EVM sources only; reverts otherwise) |
+
+Refunds pay out on Base rather than bouncing back over CCTP, because a burn can require a nonzero `minFee` even at standard finality, and the refund has nothing to pay it from.
+
+**`destinationCaller` must be the router.** If it is `bytes32(0)`, anyone can relay the message directly to the MessageTransmitter. The USDC is then minted to the router with no deposit, and `sweep` sends it to `FEE_RECIPIENT`. The router can't enforce this, because it is set on the source chain.
+
+`hook.deadline` must cover the attestation delay: seconds for fast transfers, and roughly 15–20 minutes for standard transfers from L2s that wait for Ethereum finality. `minShares` should be sized from the expected minted amount (`amount − maxFee`) minus the router fee.
+
+#### Outbound: Base withdrawal → other chain
+
+`withdrawAndBridge(pool, shares, minAssets, deadline, CctpBridge{destinationDomain, mintRecipient, maxFee, minFinalityThreshold})`:
+
+1. Runs the same redeem path as `withdraw`, with the router as the USDC receiver. It supports `shares = max`, requires `minAssets > 0`, and checks the USDC delta.
+2. Approves `TokenMessengerV2` for exactly the redeemed amount, calls `depositForBurn` with `destinationCaller = 0`, then resets the approval to 0.
+3. Emits `Withdraw(sender, receiver = router, …)` followed by `CctpBridged`.
+
+The destination is rejected with `InvalidBridgeDestination()` when `mintRecipient` is zero, when it is the router's own address (the same on every chain under CREATE3, so the USDC would be swept there), or when `destinationDomain` is Base itself. Like `withdraw`, this path charges no router fee and can't be blocked by the guardian. The recipient gets `assets − feeExecuted`, where `feeExecuted ≤ maxFee`. With `destinationCaller = 0`, anyone can relay the message on the destination chain; our relayer, or the recipient itself, calls `MessageTransmitterV2.receiveMessage` there.
+
+#### Trust assumptions
+
+`TokenMessengerV2` and `MessageTransmitterV2` are upgradeable proxies owned by Circle, and the Circle attesters sign every message. That is the same trust already placed in Circle as the USDC issuer. The router treats Circle's contracts as trusted for minting, but never as trusted for amounts: what the router receives is always measured as a balance delta.
+
 ---
 
 ## 5. Deploy-time config
@@ -355,12 +410,13 @@ constructor(
     address guardian_,
     address usdc_,                   // native USDC on this chain
     address aavePool_,               // address(0) if no AAVE_V3 pools on this chain
+    address cctpTokenMessenger_,     // Circle TokenMessengerV2, or address(0) for no CCTP (§4.8)
     FeeTier[] memory feeTiers_,
     PoolInit[] memory pools_
 )
 ```
 
-- `FEE_RECIPIENT`, `GUARDIAN`, `USDC` and `AAVE_POOL` are `immutable`.
+- `FEE_RECIPIENT`, `GUARDIAN`, `USDC`, `AAVE_POOL` and the three `CCTP_*` values are `immutable`.
 - Reverts if `feeRecipient_`, `guardian_` or `usdc_` is zero, or if any fee tier or pool check from §5 fails.
 - Emits `FeeTiersSet` once and `PoolAdded` for every pool, so the subgraph reads the full config from the deploy block.
 - The constructor must not read `msg.sender`: under CREATE3 it is the CreateX proxy, not the deployer.
@@ -406,10 +462,23 @@ event PoolDepositsDisabled(address indexed pool);
 event AllDepositsDisabled();
 
 event Swept(address indexed token, uint256 amount);
+
+// CCTP (§4.8)
+event CctpReceived(bytes32 indexed nonce, uint32 indexed sourceDomain, bytes32 messageSender, uint256 amount);
+event CctpRefunded(address indexed to, uint256 amount);
+event CctpBridged(
+    address indexed sender,
+    uint32 indexed destinationDomain,
+    bytes32 indexed mintRecipient,
+    uint256 amount,
+    uint256 maxFee,
+    uint32 minFinalityThreshold
+);
 ```
 
 Notes for the indexer:
 
+- A CCTP deposit is `CctpReceived` followed by `Deposit` in the same transaction; a refund is `CctpReceived` followed by `CctpRefunded`. A bridged withdrawal is `Withdraw` (receiver = the router) followed by `CctpBridged`. The subgraph stores these as `CctpTransfer` entities (`IN` / `REFUND` / `OUT`) and joins them to deposits and withdrawals by transaction hash.
 - `feeBps` and `tierIndex` are recorded at deposit time, so fee analytics don't need to join against the tier table.
 - `asset` is always `USDC` in v1.0. It stays in `Deposit` and `Withdraw` so the same subgraph schema works for later releases that support more assets.
 - Suggested subgraph entities: `Router`, `User`, `Pool`, `Position (user × pool)`, `DepositEvent`, `WithdrawEvent`, `FeeTierSnapshot`, `DailyPoolStats`, `ProtocolStats`.
@@ -443,11 +512,11 @@ Notes for the indexer:
 
 ### Invariants
 
-1. **The router only pulls funds from `msg.sender`.** There is never an arbitrary `from` parameter. This is the property that makes standing (max) approvals to the router safe.
+1. **The router only pulls funds from `msg.sender`.** There is never an arbitrary `from` parameter. (CCTP deposits pull nothing: the USDC is minted to the router inside the same call, §4.8.) This is the property that makes standing (max) approvals to the router safe.
 2. **The router balance is unchanged after every user call.** It holds zero of every token, apart from accidental donations.
 3. **The fee goes only to `FEE_RECIPIENT`, and is ≤ `grossAssets * MAX_FEE_BPS / 10_000`.**
 4. **Withdrawals can't be blocked by anyone with a role in the router.**
-5. Every outstanding approval from the router to a vault or the Aave Pool is **0** after each call.
+5. Every outstanding approval from the router to a vault, the Aave Pool or the CCTP TokenMessenger is **0** after each call.
 6. **Pool list and fee tiers never change after construction.**
 
 ### Mechanisms
@@ -466,10 +535,13 @@ Notes for the indexer:
 | Compromised deployer key | Can't touch any deployed router. It **can** claim the router address on a chain we haven't deployed to yet, with a malicious config. Keep the deployer EOA cold; the frontend allowlists `(chainId, router)` pairs instead of trusting the address alone. |
 | Receiver = zero / router itself / the pool | Revert with `InvalidReceiver(receiver)`. |
 | Zero amounts | Revert with `ZeroAmount()`. |
+| Forged CCTP message posing as a burn | The message `recipient` must be the local TokenMessenger, `mintRecipient` must be the router, and the amount is the router's USDC delta across `receiveMessage`, never a parsed field. |
+| CCTP deposit that can never succeed | It reverts, leaving the nonce unused; `receiveAndRefund` pays the USDC out on Base (§4.8). |
+| Bridging to an address that can't use the USDC | `mintRecipient` can't be zero or the router; the destination domain can't be the local one. |
 
 ### Custom errors
 
-`ZeroAddress()`, `ZeroAmount()`, `DeadlineExpired()`, `PoolNotRegistered(address)`, `DuplicatePool(address)`, `DepositsDisabled(address)`, `AllDepositsAreDisabled()`, `InvalidReceiver(address)`, `AssetMismatch(address pool)`, `InvalidFeeTiers()`, `FeeTooHigh(uint16)`, `SlippageExceeded(uint256 actual, uint256 min)`, `UnexpectedTransferAmount(uint256 expected, uint256 received)`, `InvalidPoolType()`, `AaveReserveMismatch()`, `NotGuardian()`.
+`ZeroAddress()`, `ZeroAmount()`, `DeadlineExpired()`, `PoolNotRegistered(address)`, `DuplicatePool(address)`, `DepositsDisabled(address)`, `AllDepositsAreDisabled()`, `InvalidReceiver(address)`, `AssetMismatch(address pool)`, `InvalidFeeTiers()`, `FeeTooHigh(uint16)`, `SlippageExceeded(uint256 actual, uint256 min)`, `UnexpectedTransferAmount(uint256 expected, uint256 received)`, `InvalidPoolType()`, `AaveReserveMismatch()`, `NotGuardian()`, `CctpNotSupported()`, `InvalidCctpMessage()`, `InvalidHookData()`, `RefundNotAllowed()`, `InvalidBridgeDestination()`.
 
 The global kill-switch error is `AllDepositsAreDisabled()`, not `AllDepositsDisabled()`, because Solidity doesn't allow an error and an event (`AllDepositsDisabled()`, §7) to share a name.
 

@@ -23,6 +23,7 @@ contract Deploy is Script {
         address guardian;
         address usdc;
         address aavePool;
+        address cctpTokenMessenger;
         IRestakeRouter.FeeTier[] feeTiers;
         IRestakeRouter.PoolInit[] pools;
         bool[] poolVerified;
@@ -58,6 +59,7 @@ contract Deploy is Script {
         cfg.guardian = vm.parseJsonAddress(json, string.concat(ctor, ".guardian"));
         cfg.usdc = vm.parseJsonAddress(json, string.concat(ctor, ".usdc"));
         cfg.aavePool = vm.parseJsonAddress(json, string.concat(ctor, ".aavePool"));
+        cfg.cctpTokenMessenger = vm.parseJsonAddress(json, string.concat(ctor, ".cctpTokenMessenger"));
 
         uint256 nTiers = _arrayLength(json, string.concat(ctor, ".feeTiers"));
         cfg.feeTiers = new IRestakeRouter.FeeTier[](nTiers);
@@ -124,7 +126,9 @@ contract Deploy is Script {
     function initCode(Config memory cfg) public pure returns (bytes memory) {
         return abi.encodePacked(
             type(RestakeRouter).creationCode,
-            abi.encode(cfg.feeRecipient, cfg.guardian, cfg.usdc, cfg.aavePool, cfg.feeTiers, cfg.pools)
+            abi.encode(
+                cfg.feeRecipient, cfg.guardian, cfg.usdc, cfg.aavePool, cfg.cctpTokenMessenger, cfg.feeTiers, cfg.pools
+            )
         );
     }
 

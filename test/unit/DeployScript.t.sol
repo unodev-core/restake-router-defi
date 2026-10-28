@@ -24,6 +24,7 @@ contract DeployScriptTest is Test {
         assertFalse(cfg.crossChainRedeployProtection);
         assertEq(cfg.usdc, 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913);
         assertEq(cfg.aavePool, 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5);
+        assertEq(cfg.cctpTokenMessenger, 0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d); // TokenMessengerV2
 
         assertEq(cfg.feeTiers.length, 3);
         assertEq(cfg.feeTiers[0].minAmount, 0);

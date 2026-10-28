@@ -27,6 +27,7 @@ dataSources:
         - DepositEvent
         - WithdrawEvent
         - SweepEvent
+        - CctpTransfer
         - DailyPoolStats
         - ProtocolStats
       abis:
@@ -47,3 +48,9 @@ dataSources:
           handler: handleAllDepositsDisabled
         - event: Swept(indexed address,uint256)
           handler: handleSwept
+        - event: CctpReceived(indexed bytes32,indexed uint32,bytes32,uint256)
+          handler: handleCctpReceived
+        - event: CctpRefunded(indexed address,uint256)
+          handler: handleCctpRefunded
+        - event: CctpBridged(indexed address,indexed uint32,indexed bytes32,uint256,uint256,uint32)
+          handler: handleCctpBridged

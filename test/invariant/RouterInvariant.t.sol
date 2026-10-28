@@ -27,6 +27,7 @@ contract RouterHandler is Test {
     uint256 public ghostMaxFees;
     uint256 public ghostDeposits;
     uint256 public ghostWithdrawals;
+    uint256 internal _nonce;
 
     constructor(RestakeRouter router_, MockAToken aToken_, address guardian_) {
         router = router_;
@@ -97,6 +98,75 @@ contract RouterHandler is Test {
         }
     }
 
+    /// @dev CCTP inbound: a burn on Arbitrum minting `amount - cctpFee` to the router, relayed with a deposit hook.
+    function bridgeDeposit(uint256 poolSeed, uint256 amount, uint256 cctpFee, uint256 receiverSeed) external {
+        address pool = pools[poolSeed % pools.length];
+        if (router.allDepositsDisabled() || router.depositsDisabled(pool)) return;
+        address receiver = actors[receiverSeed % actors.length];
+        amount = bound(amount, 2, 1_000_000e6);
+        cctpFee = bound(cctpFee, 0, (amount - 1) / 1000);
+
+        bytes memory hook = abi.encode(IRestakeRouter.CctpDepositHook(pool, 0, receiver, block.timestamp, 0));
+        (, uint256 fee) = router.receiveAndDeposit(_message(amount, cctpFee, hook), "");
+
+        uint256 minted = amount - cctpFee;
+        ghostGross += minted;
+        ghostFees += fee;
+        ghostMaxFees += minted * router.MAX_FEE_BPS() / 10_000;
+        ++ghostDeposits;
+    }
+
+    /// @dev CCTP outbound: withdraw and burn to the actor's address on Arbitrum.
+    function withdrawAndBridge(uint256 actorSeed, uint256 poolSeed, uint256 fractionBps) external {
+        address pool = pools[poolSeed % pools.length];
+        address actor = actors[actorSeed % actors.length];
+        uint256 balance = IERC20(pool).balanceOf(actor);
+        fractionBps = bound(fractionBps, 1, 10_000);
+        uint256 shares = fractionBps == 10_000 ? type(uint256).max : balance * fractionBps / 10_000;
+        if (
+            balance == 0 || shares == 0
+                || router.previewWithdraw(pool, shares == type(uint256).max ? balance : shares) == 0
+        ) {
+            return;
+        }
+        if (pool == address(aToken) && shares < 2) return;
+
+        IRestakeRouter.CctpBridge memory bridge = IRestakeRouter.CctpBridge({
+            destinationDomain: 3, mintRecipient: bytes32(uint256(uint160(actor))), maxFee: 0, minFinalityThreshold: 2000
+        });
+        vm.startPrank(actor);
+        IERC20(pool).approve(address(router), type(uint256).max);
+        router.withdrawAndBridge(pool, shares, 1, block.timestamp, bridge);
+        vm.stopPrank();
+        ++ghostWithdrawals;
+    }
+
+    function _message(uint256 amount, uint256 cctpFee, bytes memory hook) internal returns (bytes memory) {
+        bytes memory body = abi.encodePacked(
+            uint32(1),
+            bytes32(uint256(uint160(address(usdc)))),
+            bytes32(uint256(uint160(address(router)))),
+            amount,
+            bytes32(uint256(0xA4B)),
+            cctpFee,
+            cctpFee,
+            uint256(0),
+            hook
+        );
+        return abi.encodePacked(
+            uint32(1),
+            uint32(3),
+            router.CCTP_LOCAL_DOMAIN(),
+            bytes32(++_nonce),
+            bytes32(uint256(0xA4B)),
+            bytes32(uint256(uint160(router.CCTP_TOKEN_MESSENGER()))),
+            bytes32(uint256(uint160(address(router)))),
+            uint32(1000),
+            uint32(2000),
+            body
+        );
+    }
+
     function disablePool(uint256 poolSeed, uint256 chance) external {
         if (chance % 20 != 0) return; // rare
         vm.prank(guardian);
@@ -119,12 +189,14 @@ contract RouterInvariantTest is BaseTest {
         tiersHash = keccak256(abi.encode(router.getFeeTiers()));
         poolsHash = _poolsHash();
 
-        bytes4[] memory selectors = new bytes4[](5);
+        bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = RouterHandler.deposit.selector;
         selectors[1] = RouterHandler.withdraw.selector;
         selectors[2] = RouterHandler.accrue.selector;
         selectors[3] = RouterHandler.disablePool.selector;
         selectors[4] = RouterHandler.warp.selector;
+        selectors[5] = RouterHandler.bridgeDeposit.selector;
+        selectors[6] = RouterHandler.withdrawAndBridge.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }

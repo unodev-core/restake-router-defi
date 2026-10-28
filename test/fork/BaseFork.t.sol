@@ -69,6 +69,7 @@ abstract contract BaseForkTest is Test {
         cfg.guardian = c.guardian;
         cfg.usdc = c.usdc;
         cfg.aavePool = c.aavePool;
+        cfg.cctpTokenMessenger = c.cctpTokenMessenger;
         for (uint256 i; i < c.feeTiers.length; ++i) {
             cfg.feeTiers.push(c.feeTiers[i]);
         }
@@ -114,6 +115,7 @@ abstract contract BaseForkTest is Test {
     function _assertRouterClean() internal view {
         assertEq(usdc.balanceOf(address(router)), 0, "router USDC");
         assertEq(usdc.allowance(address(router), cfg.aavePool), 0, "aave allowance");
+        assertEq(usdc.allowance(address(router), cfg.cctpTokenMessenger), 0, "cctp allowance");
         for (uint256 i; i < cfg.pools.length; ++i) {
             assertEq(IERC20(cfg.pools[i].pool).balanceOf(address(router)), 0, "router shares");
             assertEq(usdc.allowance(address(router), cfg.pools[i].pool), 0, "vault allowance");
