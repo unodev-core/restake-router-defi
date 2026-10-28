@@ -79,8 +79,8 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
         // slither-disable-next-line missing-zero-check zero deploys without CCTP support
         CCTP_TOKEN_MESSENGER = cctpTokenMessenger_;
-        address transmitter;
-        uint32 localDomain;
+        address transmitter = address(0);
+        uint32 localDomain = 0;
         if (cctpTokenMessenger_ != address(0)) {
             transmitter = ITokenMessengerV2(cctpTokenMessenger_).localMessageTransmitter();
             if (transmitter == address(0)) revert ZeroAddress();
