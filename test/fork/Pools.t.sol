@@ -90,7 +90,7 @@ contract PoolsForkTest is BaseForkTest {
         vm.startPrank(payer);
         usdc.approve(address(router), AMOUNT);
         (uint256 shares, uint256 paidFee) =
-            router.deposit(pool, AMOUNT, expected * 9_990 / 10_000, alice, block.timestamp, 0);
+            router.deposit(pool, AMOUNT, expected * 9_990 / 10_000, alice, block.timestamp, 0, bytes32(0));
         vm.stopPrank();
 
         assertEq(paidFee, fee, "fee");
@@ -144,7 +144,7 @@ contract PoolsForkTest is BaseForkTest {
         vm.startPrank(alice);
         IERC20(YO_USD).approve(address(router), shares);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.SlippageExceeded.selector, 0, 1));
-        router.withdraw(YO_USD, shares, 1, alice, block.timestamp);
+        router.withdraw(YO_USD, shares, 1, alice, block.timestamp, bytes32(0));
         vm.stopPrank();
 
         assertEq(IERC20(YO_USD).balanceOf(alice), shares, "shares stay with the user");
@@ -158,7 +158,7 @@ contract PoolsForkTest is BaseForkTest {
         vm.startPrank(alice);
         IERC20(SKY_SUSDC).approve(address(router), shares);
         vm.expectRevert();
-        router.withdraw(SKY_SUSDC, shares, 1, alice, block.timestamp);
+        router.withdraw(SKY_SUSDC, shares, 1, alice, block.timestamp, bytes32(0));
         vm.stopPrank();
 
         assertEq(IERC20(SKY_SUSDC).balanceOf(alice), shares);
@@ -174,7 +174,7 @@ contract PoolsForkTest is BaseForkTest {
         vm.startPrank(alice);
         usdc.approve(address(router), AMOUNT);
         vm.expectRevert(IRestakeRouter.AllDepositsAreDisabled.selector);
-        router.deposit(SKY_SUSDC, AMOUNT, 0, alice, block.timestamp, 0);
+        router.deposit(SKY_SUSDC, AMOUNT, 0, alice, block.timestamp, 0, bytes32(0));
         vm.stopPrank();
 
         assertGt(_withdrawAs(alice, SKY_SUSDC, shares), 0);

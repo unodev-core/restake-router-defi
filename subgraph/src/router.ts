@@ -94,6 +94,7 @@ export function handleDeposit(event: Deposit): void {
   entity.tierIndex = p.tierIndex;
   entity.feeBps = p.feeBps;
   entity.referralCode = p.referralCode;
+  entity.partnerUserRef = p.partnerUserRef;
   entity.blockNumber = event.block.number;
   entity.timestamp = event.block.timestamp;
   entity.transactionHash = event.transaction.hash;
@@ -144,6 +145,7 @@ export function handleWithdraw(event: Withdraw): void {
   entity.asset = p.asset;
   entity.shares = p.shares;
   entity.assets = p.assets;
+  entity.partnerUserRef = p.partnerUserRef;
   entity.blockNumber = event.block.number;
   entity.timestamp = event.block.timestamp;
   entity.transactionHash = event.transaction.hash;

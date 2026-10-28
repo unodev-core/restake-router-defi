@@ -18,7 +18,7 @@ contract WithdrawTest is BaseTest {
         _approveShares(alice, address(vault18), half);
 
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(vault18), half, expected, alice, block.timestamp);
+        uint256 assets = router.withdraw(address(vault18), half, expected, alice, block.timestamp, bytes32(0));
 
         assertEq(assets, expected);
         assertEq(usdc.balanceOf(alice), assets);
@@ -32,9 +32,9 @@ contract WithdrawTest is BaseTest {
         _approveShares(alice, address(vault), type(uint256).max);
 
         vm.expectEmit(true, true, true, true, address(router));
-        emit IRestakeRouter.Withdraw(alice, bob, address(vault), address(usdc), shares, 997e6);
+        emit IRestakeRouter.Withdraw(alice, bob, address(vault), address(usdc), shares, 997e6, USER_REF);
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(vault), type(uint256).max, 1, bob, block.timestamp);
+        uint256 assets = router.withdraw(address(vault), type(uint256).max, 1, bob, block.timestamp, USER_REF);
 
         assertEq(assets, 997e6);
         assertEq(usdc.balanceOf(bob), 997e6);
@@ -46,7 +46,7 @@ contract WithdrawTest is BaseTest {
         uint256 shares = _deposit(alice, address(asyncVault), 1_000e6);
         _approveShares(alice, address(asyncVault), shares);
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(asyncVault), shares, 1, alice, block.timestamp);
+        uint256 assets = router.withdraw(address(asyncVault), shares, 1, alice, block.timestamp, bytes32(0));
         assertEq(assets, 997e6);
         _assertRouterClean();
     }
@@ -60,7 +60,7 @@ contract WithdrawTest is BaseTest {
 
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.SlippageExceeded.selector, 0, 1));
         vm.prank(alice);
-        router.withdraw(address(asyncVault), shares, 1, alice, block.timestamp);
+        router.withdraw(address(asyncVault), shares, 1, alice, block.timestamp, bytes32(0));
 
         assertEq(asyncVault.balanceOf(alice), shares, "shares back with alice");
         assertEq(asyncVault.pendingShares(alice), 0, "nothing queued");
@@ -81,7 +81,7 @@ contract WithdrawTest is BaseTest {
 
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.UnexpectedTransferAmount.selector, shares, shares / 2));
         vm.prank(alice);
-        router.withdraw(address(lossy), shares, 1, alice, block.timestamp);
+        router.withdraw(address(lossy), shares, 1, alice, block.timestamp, bytes32(0));
     }
 
     // ───────────── Aave ─────────────
@@ -93,7 +93,7 @@ contract WithdrawTest is BaseTest {
         _approveShares(alice, address(aToken), amount);
 
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(aToken), amount, amount - 1, alice, block.timestamp);
+        uint256 assets = router.withdraw(address(aToken), amount, amount - 1, alice, block.timestamp, bytes32(0));
 
         assertApproxEqAbs(assets, amount, 1);
         assertGt(aToken.balanceOf(alice), aBal - amount, "interest kept");
@@ -111,7 +111,8 @@ contract WithdrawTest is BaseTest {
         uint256 balance = aToken.balanceOf(alice);
 
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(aToken), type(uint256).max, balance - 1, alice, block.timestamp);
+        uint256 assets =
+            router.withdraw(address(aToken), type(uint256).max, balance - 1, alice, block.timestamp, bytes32(0));
 
         assertApproxEqAbs(assets, balance, 1);
         assertEq(aToken.scaledBalanceOf(alice), 0, "alice dust");
@@ -132,7 +133,7 @@ contract WithdrawTest is BaseTest {
         _approveShares(alice, address(aToken), type(uint256).max);
 
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(aToken), toWithdraw, 1, alice, block.timestamp);
+        uint256 assets = router.withdraw(address(aToken), toWithdraw, 1, alice, block.timestamp, bytes32(0));
 
         assertApproxEqAbs(assets, fraction == 100 ? balance : toWithdraw, 1);
         assertEq(aToken.scaledBalanceOf(address(router)), 0);
@@ -148,7 +149,7 @@ contract WithdrawTest is BaseTest {
         uint256 shares = _deposit(alice, address(aToken), 1_000e6);
         _approveShares(alice, address(aToken), shares);
         vm.prank(alice);
-        uint256 assets = router.withdraw(address(aToken), shares, 1, alice, block.timestamp);
+        uint256 assets = router.withdraw(address(aToken), shares, 1, alice, block.timestamp, bytes32(0));
 
         assertApproxEqAbs(assets, shares, 1);
         assertApproxEqAbs(aToken.balanceOf(address(router)), 10e6, 1);
@@ -171,7 +172,7 @@ contract WithdrawTest is BaseTest {
         for (uint256 i; i < pools.length; ++i) {
             _approveShares(alice, pools[i], type(uint256).max);
             vm.prank(alice);
-            router.withdraw(pools[i], type(uint256).max, 1, alice, block.timestamp);
+            router.withdraw(pools[i], type(uint256).max, 1, alice, block.timestamp, bytes32(0));
             assertEq(IERC20(pools[i]).balanceOf(alice), 0);
         }
         _assertRouterClean();
@@ -184,25 +185,25 @@ contract WithdrawTest is BaseTest {
         _approveShares(alice, address(vault), shares);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.SlippageExceeded.selector, 997e6, 997e6 + 1));
         vm.prank(alice);
-        router.withdraw(address(vault), shares, 997e6 + 1, alice, block.timestamp);
+        router.withdraw(address(vault), shares, 997e6 + 1, alice, block.timestamp, bytes32(0));
     }
 
     function test_revert_zeroMinAssets() public {
         uint256 shares = _deposit(alice, address(vault), 1_000e6);
         vm.expectRevert(IRestakeRouter.ZeroAmount.selector);
         vm.prank(alice);
-        router.withdraw(address(vault), shares, 0, alice, block.timestamp);
+        router.withdraw(address(vault), shares, 0, alice, block.timestamp, bytes32(0));
     }
 
     function test_revert_zeroShares() public {
         vm.expectRevert(IRestakeRouter.ZeroAmount.selector);
         vm.prank(alice);
-        router.withdraw(address(vault), 0, 1, alice, block.timestamp);
+        router.withdraw(address(vault), 0, 1, alice, block.timestamp, bytes32(0));
 
         // "max" with an empty balance is also zero.
         vm.expectRevert(IRestakeRouter.ZeroAmount.selector);
         vm.prank(alice);
-        router.withdraw(address(vault), type(uint256).max, 1, alice, block.timestamp);
+        router.withdraw(address(vault), type(uint256).max, 1, alice, block.timestamp, bytes32(0));
     }
 
     function test_revert_deadline() public {
@@ -210,13 +211,13 @@ contract WithdrawTest is BaseTest {
         vm.warp(block.timestamp + 1 hours);
         vm.expectRevert(IRestakeRouter.DeadlineExpired.selector);
         vm.prank(alice);
-        router.withdraw(address(vault), shares, 1, alice, block.timestamp - 1);
+        router.withdraw(address(vault), shares, 1, alice, block.timestamp - 1, bytes32(0));
     }
 
     function test_revert_unregisteredPool() public {
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.PoolNotRegistered.selector, address(usdc)));
         vm.prank(alice);
-        router.withdraw(address(usdc), 1, 1, alice, block.timestamp);
+        router.withdraw(address(usdc), 1, 1, alice, block.timestamp, bytes32(0));
     }
 
     function test_revert_invalidReceiver() public {
@@ -225,7 +226,7 @@ contract WithdrawTest is BaseTest {
         for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.InvalidReceiver.selector, bad[i]));
             vm.prank(alice);
-            router.withdraw(address(vault), shares, 1, bad[i], block.timestamp);
+            router.withdraw(address(vault), shares, 1, bad[i], block.timestamp, bytes32(0));
         }
     }
 
@@ -236,11 +237,13 @@ contract WithdrawTest is BaseTest {
         router = _deployRouter(defaultTiers(), pools);
         uint256 shares = _deposit(alice, address(evil), 1_000e6);
 
-        evil.arm(router, abi.encodeCall(IRestakeRouter.withdraw, (address(evil), 1, 1, alice, block.timestamp)));
+        evil.arm(
+            router, abi.encodeCall(IRestakeRouter.withdraw, (address(evil), 1, 1, alice, block.timestamp, bytes32(0)))
+        );
         _approveShares(alice, address(evil), shares);
         vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
         vm.prank(alice);
-        router.withdraw(address(evil), shares, 1, alice, block.timestamp);
+        router.withdraw(address(evil), shares, 1, alice, block.timestamp, bytes32(0));
     }
 
     /// @dev Invariant 1: bob can't spend alice's standing share approval.
@@ -249,10 +252,10 @@ contract WithdrawTest is BaseTest {
         _approveShares(alice, address(vault), type(uint256).max);
         vm.expectRevert(IRestakeRouter.ZeroAmount.selector);
         vm.prank(bob);
-        router.withdraw(address(vault), type(uint256).max, 1, bob, block.timestamp);
+        router.withdraw(address(vault), type(uint256).max, 1, bob, block.timestamp, bytes32(0));
         vm.expectRevert();
         vm.prank(bob);
-        router.withdraw(address(vault), shares, 1, bob, block.timestamp);
+        router.withdraw(address(vault), shares, 1, bob, block.timestamp, bytes32(0));
         assertEq(vault.balanceOf(alice), shares);
     }
 

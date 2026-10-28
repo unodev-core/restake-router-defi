@@ -80,6 +80,7 @@ type DepositEvent @entity(immutable: true) {
   tierIndex: Int!
   feeBps: Int!
   referralCode: Bytes!
+  partnerUserRef: Bytes! # omnibus partner's per-user tag, 0x00…00 = none
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!
@@ -94,6 +95,7 @@ type WithdrawEvent @entity(immutable: true) {
   asset: Bytes!
   shares: BigInt!
   assets: BigInt!
+  partnerUserRef: Bytes! # omnibus partner's per-user tag, 0x00…00 = none
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!

@@ -35,7 +35,7 @@ contract CctpForkTest is BaseForkTest {
             vm.startPrank(alice);
             _approve(pool);
             burned += router.withdrawAndBridge(
-                pool, type(uint256).max, _max(expected * 99 / 100, 1), block.timestamp, bridge
+                pool, type(uint256).max, _max(expected * 99 / 100, 1), block.timestamp, bytes32(0), bridge
             );
             vm.stopPrank();
             _assertRouterClean();

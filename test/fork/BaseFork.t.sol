@@ -90,7 +90,8 @@ abstract contract BaseForkTest is Test {
         (,,, uint256 expected) = router.previewDeposit(pool, amount);
         vm.startPrank(user);
         usdc.approve(address(router), amount);
-        (shares, fee) = router.deposit(pool, amount, expected * 9_990 / 10_000, user, block.timestamp, bytes32("fork"));
+        (shares, fee) =
+            router.deposit(pool, amount, expected * 9_990 / 10_000, user, block.timestamp, bytes32("fork"), bytes32(0));
         vm.stopPrank();
     }
 
@@ -100,7 +101,7 @@ abstract contract BaseForkTest is Test {
         vm.startPrank(user);
         IERC20(pool).approve(address(router), type(uint256).max);
         // AUTO Autopools can return less than previewRedeem when unwinding (§8): 1% tolerance.
-        assets = router.withdraw(pool, shares, _max(expected * 99 / 100, 1), user, block.timestamp);
+        assets = router.withdraw(pool, shares, _max(expected * 99 / 100, 1), user, block.timestamp, bytes32(0));
         vm.stopPrank();
     }
 

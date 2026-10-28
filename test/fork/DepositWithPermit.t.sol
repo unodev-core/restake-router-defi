@@ -20,7 +20,7 @@ contract DepositWithPermitForkTest is BaseForkTest {
             (uint8 v, bytes32 r, bytes32 s) = _sign(key, owner, 1_000e6);
             vm.prank(owner);
             (uint256 shares,) =
-                router.depositWithPermit(pool, 1_000e6, 1, owner, block.timestamp, bytes32("fork"), v, r, s);
+                router.depositWithPermit(pool, 1_000e6, 1, owner, block.timestamp, bytes32("fork"), bytes32(0), v, r, s);
             assertGt(shares, 0);
             assertEq(usdc.allowance(owner, address(router)), 0);
             _assertRouterClean();
@@ -35,7 +35,7 @@ contract DepositWithPermitForkTest is BaseForkTest {
         (uint8 v, bytes32 r, bytes32 s) = _sign(key, a, 1_000e6);
         vm.prank(a);
         uint256 g = gasleft();
-        router.depositWithPermit(GAS_POOL, 1_000e6, 1, a, block.timestamp, 0, v, r, s);
+        router.depositWithPermit(GAS_POOL, 1_000e6, 1, a, block.timestamp, 0, bytes32(0), v, r, s);
         console2.log("depositWithPermit, 1 tx incl. 21000 base:", g - gasleft() + 21_000);
     }
 
@@ -51,7 +51,7 @@ contract DepositWithPermitForkTest is BaseForkTest {
         vm.cool(address(router));
         vm.prank(a);
         g = gasleft();
-        router.deposit(GAS_POOL, 1_000e6, 1, a, block.timestamp, 0);
+        router.deposit(GAS_POOL, 1_000e6, 1, a, block.timestamp, 0, bytes32(0));
         console2.log("approve + deposit, 2 txs incl. 2 x 21000 base:", approveGas + g - gasleft() + 42_000);
     }
 

@@ -23,7 +23,7 @@ interface IRestakeRouter {
         PoolType poolType;
     }
 
-    /// @dev CCTP `hookData` for `receiveAndDeposit`, encoded as `abi.encode(hook)` (exactly 160 bytes).
+    /// @dev CCTP `hookData` for `receiveAndDeposit`, encoded as `abi.encode(hook)` (exactly 192 bytes).
     ///      Same meaning as the `deposit` arguments; the amount is whatever CCTP mints to the router.
     struct CctpDepositHook {
         address pool;
@@ -31,6 +31,7 @@ interface IRestakeRouter {
         address receiver;
         uint256 deadline;
         bytes32 referralCode;
+        bytes32 partnerUserRef;
     }
 
     /// @dev Destination of `withdrawAndBridge`. `maxFee` and `minFinalityThreshold` are passed to
@@ -55,7 +56,8 @@ interface IRestakeRouter {
         uint256 shares,
         uint8 tierIndex,
         uint16 feeBps,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     );
 
     event Withdraw(
@@ -64,7 +66,8 @@ interface IRestakeRouter {
         address indexed pool,
         address asset,
         uint256 shares,
-        uint256 assets
+        uint256 assets,
+        bytes32 partnerUserRef
     );
 
     /// @dev Config events, emitted from the constructor only.
@@ -122,6 +125,8 @@ interface IRestakeRouter {
     ///         and send the shares / aTokens to `receiver`.
     /// @param referralCode Opaque partner / referrer tag, emitted in `Deposit`. `bytes32(0)` = no referral.
     ///                     Tracking only: it doesn't change the fee or where it goes.
+    /// @param partnerUserRef Opaque per-user tag set by an omnibus partner (e.g. its internal user ID or a
+    ///                       hash of it), emitted in `Deposit`. `bytes32(0)` = none. Tracking only.
     /// @return shares Shares (or aTokens) received by `receiver`.
     /// @return fee    Fee sent to FEE_RECIPIENT.
     function deposit(
@@ -130,7 +135,8 @@ interface IRestakeRouter {
         uint256 minShares,
         address receiver,
         uint256 deadline,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     ) external returns (uint256 shares, uint256 fee);
 
     /// @notice `deposit` in one transaction, without a prior `approve`: first applies the caller's EIP-2612
@@ -144,6 +150,7 @@ interface IRestakeRouter {
         address receiver,
         uint256 deadline,
         bytes32 referralCode,
+        bytes32 partnerUserRef,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -152,10 +159,17 @@ interface IRestakeRouter {
     /// @notice Pull `shares` (or aTokens) from msg.sender, redeem them, and send the USDC to `receiver`.
     /// @param shares    Pass type(uint256).max to withdraw msg.sender's full balance.
     /// @param minAssets Must be > 0, so a queued (async) redeem reverts instead of completing silently.
+    /// @param partnerUserRef Same as in `deposit`, emitted in `Withdraw`, so an omnibus partner can match the
+    ///                       withdrawal to one of its users. `bytes32(0)` = none. Tracking only.
     /// @return assets   USDC received by `receiver`.
-    function withdraw(address pool, uint256 shares, uint256 minAssets, address receiver, uint256 deadline)
-        external
-        returns (uint256 assets);
+    function withdraw(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        uint256 deadline,
+        bytes32 partnerUserRef
+    ) external returns (uint256 assets);
 
     /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
@@ -188,6 +202,7 @@ interface IRestakeRouter {
         uint256 shares,
         uint256 minAssets,
         uint256 deadline,
+        bytes32 partnerUserRef,
         CctpBridge calldata bridge
     ) external returns (uint256 assets);
 

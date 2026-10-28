@@ -28,10 +28,10 @@ The full design rationale is in [docs/architecture-v1.0.md](docs/architecture-v1
 - **Async redeems never get stuck.** `minAssets` must be greater than 0. If a vault queues a redeem instead of paying out (YO without idle liquidity), the whole transaction reverts and the shares stay with the user.
 - **"Withdraw all".** Passing `shares = type(uint256).max` withdraws the caller's full balance as read inside the transaction. This matters for rebasing aTokens, where an amount signed in the UI would leave dust.
 - **One-way guardian kill switches.** The guardian can disable deposits for one pool or for all pools. Nobody can re-enable them, and withdrawals can never be blocked.
-- **Permissionless and referral-aware.** Anyone can deposit or withdraw. A `bytes32 referralCode` is emitted with every deposit for off-chain attribution; it doesn't change the fee.
+- **Permissionless and referral-aware.** Anyone can deposit or withdraw. A `bytes32 referralCode` is emitted with every deposit for off-chain attribution, and a `bytes32 partnerUserRef` with every deposit and withdrawal so omnibus partners can map them to their own users. Neither changes the fee.
 - **Cross-chain USDC through Circle CCTP V2.** A partner on another chain (e.g. an Arbitrum omnibus) can burn USDC with a deposit hook, and the router mints it on Base and deposits it in the same call (`receiveAndDeposit`). `withdrawAndBridge` redeems on Base and burns the USDC straight to an address on another chain. Same fee schedule, no fee on refunds or withdrawals, and the router still holds nothing between calls.
 - **Same address on every chain.** The router is deployed through CreateX CREATE3 with a permissioned salt, so its address depends only on the deployer and the release label, not on per-chain constructor arguments.
-- **Indexer-ready events.** `Deposit` carries the gross amount, fee, net amount, shares, tier and referral code. The constructor emits the full config (`FeeTiersSet`, `PoolAdded`), so a subgraph can index everything without extra RPC calls.
+- **Indexer-ready events.** `Deposit` carries the gross amount, fee, net amount, shares, tier, referral code and partner user reference; `Withdraw` carries the partner user reference too. The constructor emits the full config (`FeeTiersSet`, `PoolAdded`), so a subgraph can index everything without extra RPC calls.
 
 ---
 
@@ -65,7 +65,7 @@ sequenceDiagram
     participant Pool as Vault / Aave Pool
     participant Fee as FEE_RECIPIENT
 
-    User->>Router: deposit(pool, assets, minShares, receiver, deadline, referralCode)
+    User->>Router: deposit(pool, assets, minShares, receiver, deadline, referralCode, partnerUserRef)
     Note over Router: deadline, receiver, pool registered,<br/>assets > 0, deposits not disabled
     Router->>USDC: transferFrom(user → router, assets)
     Note over Router: require received == assets (balance delta)
@@ -94,7 +94,7 @@ sequenceDiagram
     participant Pool as Vault / aToken
     participant Aave as Aave V3 Pool
 
-    User->>Router: withdraw(pool, shares, minAssets, receiver, deadline)
+    User->>Router: withdraw(pool, shares, minAssets, receiver, deadline, partnerUserRef)
     Note over Router: deadline, receiver, pool registered, minAssets > 0<br/>(works even when deposits are disabled)
     opt shares == type(uint256).max
         Router->>Pool: balanceOf(user)
@@ -147,13 +147,13 @@ sequenceDiagram
     R->>V: deposit(net, hook.receiver)
     Note over P,V: …later, withdrawing back to Arbitrum…
     actor O as hook.receiver (Base)
-    O->>R: withdrawAndBridge(pool, shares, minAssets, deadline,<br/>{3, omnibus, maxFee, finality})
+    O->>R: withdrawAndBridge(pool, shares, minAssets, deadline, partnerUserRef,<br/>{3, omnibus, maxFee, finality})
     R->>V: redeem → USDC to router
     R->>R: depositForBurn(assets) → USDC burned
     Note over P: relayer calls receiveMessage on Arbitrum → USDC minted to omnibus
 ```
 
-`hookData` is `abi.encode(pool, minShares, receiver, deadline, referralCode)`. `destinationCaller` **must** be the router: otherwise anyone can relay the burn without depositing, and the USDC is stranded in the router, where `sweep` sends it to the fee recipient. If a CCTP deposit can't go through, `receiveAndRefund` pays the USDC out on Base to `hook.receiver`, with no fee. The receiver can call it at any time; anyone can call it after the deadline. Full design: [architecture §4.8](docs/architecture-v1.0.md).
+`hookData` is `abi.encode(pool, minShares, receiver, deadline, referralCode, partnerUserRef)`. `destinationCaller` **must** be the router: otherwise anyone can relay the burn without depositing, and the USDC is stranded in the router, where `sweep` sends it to the fee recipient. If a CCTP deposit can't go through, `receiveAndRefund` pays the USDC out on Base to `hook.receiver`, with no fee. The receiver can call it at any time; anyone can call it after the deadline. Full design: [architecture §4.8](docs/architecture-v1.0.md).
 
 ### Fee tiers
 

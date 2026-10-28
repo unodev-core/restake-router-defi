@@ -31,20 +31,20 @@ contract CctpTest is BaseTest {
         vm.expectRevert(IRestakeRouter.CctpNotSupported.selector);
         r.receiveAndRefund("", "");
         vm.expectRevert(IRestakeRouter.CctpNotSupported.selector);
-        r.withdrawAndBridge(address(vault), 1, 1, block.timestamp, _bridge(omnibus, 0));
+        r.withdrawAndBridge(address(vault), 1, 1, block.timestamp, bytes32(0), _bridge(omnibus, 0));
     }
 
     // ───────────── Inbound: receiveAndDeposit ─────────────
 
     function test_receiveAndDeposit_vault() public {
         bytes memory message =
-            _cctpMessage("n1", omnibus, 1_000e6, 0, _hook(address(vault), 0, omnibus, block.timestamp, REF));
+            _cctpMessage("n1", omnibus, 1_000e6, 0, _hook(address(vault), 0, omnibus, block.timestamp, REF, USER_REF));
 
         vm.expectEmit(true, true, true, true, address(router));
         emit IRestakeRouter.CctpReceived("n1", ARBITRUM_DOMAIN, _toBytes32(omnibus), 1_000e6);
         vm.expectEmit(true, true, true, true, address(router));
         emit IRestakeRouter.Deposit(
-            relayer, omnibus, address(vault), address(usdc), 1_000e6, 3e6, 997e6, 997e6, 0, 30, REF
+            relayer, omnibus, address(vault), address(usdc), 1_000e6, 3e6, 997e6, 997e6, 0, 30, REF, USER_REF
         );
         vm.prank(relayer);
         (uint256 shares, uint256 fee) = router.receiveAndDeposit(message, "");
@@ -124,7 +124,8 @@ contract CctpTest is BaseTest {
         router.receiveAndDeposit(message, "");
 
         // Dirty upper bits in an address word.
-        bytes memory dirty = abi.encode(uint256(type(uint160).max) + 1, 0, omnibus, block.timestamp, bytes32(0));
+        bytes memory dirty =
+            abi.encode(uint256(type(uint160).max) + 1, 0, omnibus, block.timestamp, bytes32(0), bytes32(0));
         message = _cctpMessage("n2", omnibus, 1_000e6, 0, dirty);
         vm.expectRevert(IRestakeRouter.InvalidHookData.selector);
         router.receiveAndDeposit(message, "");
@@ -216,11 +217,11 @@ contract CctpTest is BaseTest {
         IRestakeRouter.CctpBridge memory b = _bridge(omnibus, 0);
 
         vm.expectEmit(true, true, true, true, address(router));
-        emit IRestakeRouter.Withdraw(omnibus, address(router), address(vault), address(usdc), shares, 997e6);
+        emit IRestakeRouter.Withdraw(omnibus, address(router), address(vault), address(usdc), shares, 997e6, USER_REF);
         vm.expectEmit(true, true, true, true, address(router));
         emit IRestakeRouter.CctpBridged(omnibus, ARBITRUM_DOMAIN, _toBytes32(omnibus), 997e6, 0, 2000);
         vm.prank(omnibus);
-        uint256 assets = router.withdrawAndBridge(address(vault), shares, 997e6, block.timestamp, b);
+        uint256 assets = router.withdrawAndBridge(address(vault), shares, 997e6, block.timestamp, USER_REF, b);
 
         assertEq(assets, 997e6);
         assertEq(vault.balanceOf(omnibus), 0);
@@ -237,7 +238,8 @@ contract CctpTest is BaseTest {
         b.minFinalityThreshold = 1000;
 
         vm.prank(omnibus);
-        uint256 assets = router.withdrawAndBridge(address(aToken), type(uint256).max, balance - 1, block.timestamp, b);
+        uint256 assets =
+            router.withdrawAndBridge(address(aToken), type(uint256).max, balance - 1, block.timestamp, bytes32(0), b);
 
         assertApproxEqAbs(assets, balance, 1);
         assertEq(aToken.scaledBalanceOf(omnibus), 0, "no dust");
@@ -251,22 +253,22 @@ contract CctpTest is BaseTest {
         router.disableAllDeposits();
         _approveShares(omnibus, address(vault), shares);
         vm.prank(omnibus);
-        router.withdrawAndBridge(address(vault), shares, 1, block.timestamp, _bridge(omnibus, 0));
+        router.withdrawAndBridge(address(vault), shares, 1, block.timestamp, bytes32(0), _bridge(omnibus, 0));
         _assertRouterClean();
     }
 
     function test_revert_withdrawAndBridge_badDestination() public {
         vm.startPrank(omnibus);
         vm.expectRevert(IRestakeRouter.InvalidBridgeDestination.selector);
-        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp, _bridge(address(0), 0));
+        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp, bytes32(0), _bridge(address(0), 0));
 
         vm.expectRevert(IRestakeRouter.InvalidBridgeDestination.selector);
-        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp, _bridge(address(router), 0));
+        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp, bytes32(0), _bridge(address(router), 0));
 
         IRestakeRouter.CctpBridge memory local = _bridge(omnibus, 0);
         local.destinationDomain = BASE_DOMAIN;
         vm.expectRevert(IRestakeRouter.InvalidBridgeDestination.selector);
-        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp, local);
+        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp, bytes32(0), local);
         vm.stopPrank();
     }
 
@@ -275,16 +277,16 @@ contract CctpTest is BaseTest {
         _approveShares(omnibus, address(vault), shares);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.SlippageExceeded.selector, 997e6, 998e6));
         vm.prank(omnibus);
-        router.withdrawAndBridge(address(vault), shares, 998e6, block.timestamp, _bridge(omnibus, 0));
+        router.withdrawAndBridge(address(vault), shares, 998e6, block.timestamp, bytes32(0), _bridge(omnibus, 0));
     }
 
     function test_revert_withdrawAndBridge_deadlineAndZero() public {
         vm.expectRevert(IRestakeRouter.DeadlineExpired.selector);
-        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp - 1, _bridge(omnibus, 0));
+        router.withdrawAndBridge(address(vault), 1, 1, block.timestamp - 1, bytes32(0), _bridge(omnibus, 0));
         vm.expectRevert(IRestakeRouter.ZeroAmount.selector);
-        router.withdrawAndBridge(address(vault), 1, 0, block.timestamp, _bridge(omnibus, 0));
+        router.withdrawAndBridge(address(vault), 1, 0, block.timestamp, bytes32(0), _bridge(omnibus, 0));
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.PoolNotRegistered.selector, bob));
-        router.withdrawAndBridge(bob, 1, 1, block.timestamp, _bridge(omnibus, 0));
+        router.withdrawAndBridge(bob, 1, 1, block.timestamp, bytes32(0), _bridge(omnibus, 0));
     }
 
     function test_revert_withdrawAndBridge_maxFeeNotBelowAmount() public {
@@ -292,7 +294,7 @@ contract CctpTest is BaseTest {
         _approveShares(omnibus, address(vault), shares);
         vm.expectRevert("Max fee must be less than amount");
         vm.prank(omnibus);
-        router.withdrawAndBridge(address(vault), shares, 1, block.timestamp, _bridge(omnibus, 997e6));
+        router.withdrawAndBridge(address(vault), shares, 1, block.timestamp, bytes32(0), _bridge(omnibus, 997e6));
     }
 
     /// @dev Round trip: Arbitrum omnibus → Base vault → Arbitrum omnibus.
@@ -305,7 +307,8 @@ contract CctpTest is BaseTest {
         vm.assume(shares > 0);
         _approveShares(omnibus, address(vault18), shares);
         vm.prank(omnibus);
-        uint256 assets = router.withdrawAndBridge(address(vault18), shares, 1, block.timestamp, _bridge(omnibus, 0));
+        uint256 assets =
+            router.withdrawAndBridge(address(vault18), shares, 1, block.timestamp, bytes32(0), _bridge(omnibus, 0));
         assertApproxEqAbs(assets, amount - cctpFee - fee, 1);
         _assertRouterClean();
     }

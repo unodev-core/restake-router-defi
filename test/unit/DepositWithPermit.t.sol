@@ -19,10 +19,12 @@ contract DepositWithPermitTest is BaseTest {
         (uint8 v, bytes32 r, bytes32 s) = _sign(ownerKey, owner, 1_000e6, block.timestamp);
 
         vm.expectEmit(true, true, true, true, address(router));
-        emit IRestakeRouter.Deposit(owner, bob, address(vault), address(usdc), 1_000e6, 3e6, 997e6, 997e6, 0, 30, REF);
+        emit IRestakeRouter.Deposit(
+            owner, bob, address(vault), address(usdc), 1_000e6, 3e6, 997e6, 997e6, 0, 30, REF, USER_REF
+        );
         vm.prank(owner);
         (uint256 shares, uint256 fee) =
-            router.depositWithPermit(address(vault), 1_000e6, 997e6, bob, block.timestamp, REF, v, r, s);
+            router.depositWithPermit(address(vault), 1_000e6, 997e6, bob, block.timestamp, REF, USER_REF, v, r, s);
 
         assertEq(shares, 997e6);
         assertEq(fee, 3e6);
@@ -37,7 +39,8 @@ contract DepositWithPermitTest is BaseTest {
         usdc.mint(owner, 100_000e6);
         (uint8 v, bytes32 r, bytes32 s) = _sign(ownerKey, owner, 100_000e6, block.timestamp);
         vm.prank(owner);
-        (uint256 shares,) = router.depositWithPermit(address(aToken), 100_000e6, 0, owner, block.timestamp, 0, v, r, s);
+        (uint256 shares,) =
+            router.depositWithPermit(address(aToken), 100_000e6, 0, owner, block.timestamp, 0, bytes32(0), v, r, s);
         assertEq(shares, 99_900e6);
         _assertRouterClean();
     }
@@ -51,7 +54,8 @@ contract DepositWithPermitTest is BaseTest {
         usdc.permit(owner, address(router), 1_000e6, block.timestamp, v, r, s);
 
         vm.prank(owner);
-        (uint256 shares,) = router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, v, r, s);
+        (uint256 shares,) =
+            router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, bytes32(0), v, r, s);
         assertEq(shares, 997e6);
         _assertRouterClean();
     }
@@ -60,7 +64,9 @@ contract DepositWithPermitTest is BaseTest {
     function test_depositWithPermit_existingApproval() public {
         _fundAndApprove(owner, 1_000e6);
         vm.prank(owner);
-        router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, 27, bytes32(0), bytes32(0));
+        router.depositWithPermit(
+            address(vault), 1_000e6, 0, owner, block.timestamp, 0, bytes32(0), 27, bytes32(0), bytes32(0)
+        );
         assertEq(vault.balanceOf(owner), 997e6);
     }
 
@@ -71,7 +77,7 @@ contract DepositWithPermitTest is BaseTest {
             abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(router), 0, 1_000e6)
         );
         vm.prank(owner);
-        router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, v, r, s);
+        router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, bytes32(0), v, r, s);
     }
 
     /// @dev The permit owner is always msg.sender: a third party can't spend someone else's signature.
@@ -82,7 +88,7 @@ contract DepositWithPermitTest is BaseTest {
             abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(router), 0, 1_000e6)
         );
         vm.prank(bob);
-        router.depositWithPermit(address(vault), 1_000e6, 0, bob, block.timestamp, 0, v, r, s);
+        router.depositWithPermit(address(vault), 1_000e6, 0, bob, block.timestamp, 0, bytes32(0), v, r, s);
         assertEq(usdc.balanceOf(owner), 1_000e6);
     }
 
@@ -94,7 +100,7 @@ contract DepositWithPermitTest is BaseTest {
             abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(router), 0, 2_000e6)
         );
         vm.prank(owner);
-        router.depositWithPermit(address(vault), 2_000e6, 0, owner, block.timestamp, 0, v, r, s);
+        router.depositWithPermit(address(vault), 2_000e6, 0, owner, block.timestamp, 0, bytes32(0), v, r, s);
     }
 
     function test_revert_depositWithPermit_deadline() public {
@@ -104,7 +110,7 @@ contract DepositWithPermitTest is BaseTest {
         vm.warp(deadline + 1);
         vm.expectRevert(IRestakeRouter.DeadlineExpired.selector);
         vm.prank(owner);
-        router.depositWithPermit(address(vault), 1_000e6, 0, owner, deadline, 0, v, r, s);
+        router.depositWithPermit(address(vault), 1_000e6, 0, owner, deadline, 0, bytes32(0), v, r, s);
     }
 
     function test_revert_depositWithPermit_depositsDisabled() public {
@@ -114,7 +120,7 @@ contract DepositWithPermitTest is BaseTest {
         (uint8 v, bytes32 r, bytes32 s) = _sign(ownerKey, owner, 1_000e6, block.timestamp);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.DepositsDisabled.selector, address(vault)));
         vm.prank(owner);
-        router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, v, r, s);
+        router.depositWithPermit(address(vault), 1_000e6, 0, owner, block.timestamp, 0, bytes32(0), v, r, s);
     }
 
     function testFuzz_depositWithPermit(uint256 amount) public {
@@ -122,7 +128,7 @@ contract DepositWithPermitTest is BaseTest {
         usdc.mint(owner, amount);
         (uint8 v, bytes32 r, bytes32 s) = _sign(ownerKey, owner, amount, block.timestamp);
         vm.prank(owner);
-        router.depositWithPermit(address(vault18), amount, 0, owner, block.timestamp, 0, v, r, s);
+        router.depositWithPermit(address(vault18), amount, 0, owner, block.timestamp, 0, bytes32(0), v, r, s);
         assertEq(usdc.allowance(owner, address(router)), 0);
         _assertRouterClean();
     }

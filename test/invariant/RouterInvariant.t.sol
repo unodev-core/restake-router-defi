@@ -53,7 +53,7 @@ contract RouterHandler is Test {
         usdc.mint(actor, amount);
         vm.startPrank(actor);
         usdc.approve(address(router), type(uint256).max);
-        (, uint256 fee) = router.deposit(pool, amount, 0, receiver, block.timestamp, referral);
+        (, uint256 fee) = router.deposit(pool, amount, 0, receiver, block.timestamp, referral, bytes32(0));
         vm.stopPrank();
 
         ghostGross += amount;
@@ -80,7 +80,7 @@ contract RouterHandler is Test {
 
         vm.startPrank(actor);
         IERC20(pool).approve(address(router), type(uint256).max);
-        router.withdraw(pool, shares, 1, receiver, block.timestamp);
+        router.withdraw(pool, shares, 1, receiver, block.timestamp, bytes32(0));
         vm.stopPrank();
         ++ghostWithdrawals;
     }
@@ -106,7 +106,8 @@ contract RouterHandler is Test {
         amount = bound(amount, 2, 1_000_000e6);
         cctpFee = bound(cctpFee, 0, (amount - 1) / 1000);
 
-        bytes memory hook = abi.encode(IRestakeRouter.CctpDepositHook(pool, 0, receiver, block.timestamp, 0));
+        bytes memory hook =
+            abi.encode(IRestakeRouter.CctpDepositHook(pool, 0, receiver, block.timestamp, 0, bytes32(0)));
         (, uint256 fee) = router.receiveAndDeposit(_message(amount, cctpFee, hook), "");
 
         uint256 minted = amount - cctpFee;
@@ -136,7 +137,7 @@ contract RouterHandler is Test {
         });
         vm.startPrank(actor);
         IERC20(pool).approve(address(router), type(uint256).max);
-        router.withdrawAndBridge(pool, shares, 1, block.timestamp, bridge);
+        router.withdrawAndBridge(pool, shares, 1, block.timestamp, bytes32(0), bridge);
         vm.stopPrank();
         ++ghostWithdrawals;
     }

@@ -15,6 +15,7 @@ abstract contract BaseTest is Test {
     uint256 internal constant USDC_UNIT = 1e6;
     uint32 internal constant BASE_DOMAIN = 6;
     uint32 internal constant ARBITRUM_DOMAIN = 3;
+    bytes32 internal constant USER_REF = keccak256("omnibus-user-7");
 
     MockERC20 internal usdc;
     MockERC4626 internal vault; // 6-decimal shares (Fluid, YO, Veranta)
@@ -87,7 +88,7 @@ abstract contract BaseTest is Test {
     function _deposit(address user, address pool, uint256 amount) internal returns (uint256 shares) {
         _fundAndApprove(user, amount);
         vm.prank(user);
-        (shares,) = router.deposit(pool, amount, 0, user, block.timestamp, bytes32(0));
+        (shares,) = router.deposit(pool, amount, 0, user, block.timestamp, bytes32(0), bytes32(0));
     }
 
     function _approveShares(address user, address pool, uint256 amount) internal {
@@ -113,7 +114,20 @@ abstract contract BaseTest is Test {
         pure
         returns (bytes memory)
     {
-        return abi.encode(IRestakeRouter.CctpDepositHook(pool, minShares, receiver, deadline, referralCode));
+        return _hook(pool, minShares, receiver, deadline, referralCode, bytes32(0));
+    }
+
+    function _hook(
+        address pool,
+        uint256 minShares,
+        address receiver,
+        uint256 deadline,
+        bytes32 referralCode,
+        bytes32 partnerUserRef
+    ) internal pure returns (bytes memory) {
+        return abi.encode(
+            IRestakeRouter.CctpDepositHook(pool, minShares, receiver, deadline, referralCode, partnerUserRef)
+        );
     }
 
     /// @dev MessageV2 carrying a BurnMessageV2 of USDC from Arbitrum to the router on Base, relayable only

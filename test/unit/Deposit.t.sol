@@ -21,7 +21,8 @@ contract DepositTest is BaseTest {
         uint256 expectedShares = vault18.previewDeposit(amount - 3e6);
 
         vm.prank(alice);
-        (uint256 shares, uint256 fee) = router.deposit(address(vault18), amount, 0, alice, block.timestamp, REFERRAL);
+        (uint256 shares, uint256 fee) =
+            router.deposit(address(vault18), amount, 0, alice, block.timestamp, REFERRAL, bytes32(0));
 
         assertEq(fee, 3e6, "0.30% fee");
         assertEq(shares, expectedShares, "shares");
@@ -37,7 +38,8 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, amount);
 
         vm.prank(alice);
-        (uint256 shares, uint256 fee) = router.deposit(address(aToken), amount, 0, alice, block.timestamp, 0);
+        (uint256 shares, uint256 fee) =
+            router.deposit(address(aToken), amount, 0, alice, block.timestamp, 0, bytes32(0));
 
         assertEq(fee, 100e6, "0.20% fee");
         assertEq(shares, amount - fee, "aTokens 1:1 at index 1");
@@ -54,7 +56,8 @@ contract DepositTest is BaseTest {
         uint256 amount = 777_777_777;
         _fundAndApprove(alice, amount);
         vm.prank(alice);
-        (uint256 shares, uint256 fee) = router.deposit(address(aToken), amount, 0, alice, block.timestamp, 0);
+        (uint256 shares, uint256 fee) =
+            router.deposit(address(aToken), amount, 0, alice, block.timestamp, 0, bytes32(0));
 
         assertEq(shares, aToken.balanceOf(alice) - before);
         assertApproxEqAbs(shares, amount - fee, 1);
@@ -64,7 +67,7 @@ contract DepositTest is BaseTest {
     function test_deposit_toOtherReceiver() public {
         _fundAndApprove(alice, 1_000e6);
         vm.prank(alice);
-        (uint256 shares,) = router.deposit(address(vault), 1_000e6, 0, bob, block.timestamp, 0);
+        (uint256 shares,) = router.deposit(address(vault), 1_000e6, 0, bob, block.timestamp, 0, bytes32(0));
         assertEq(vault.balanceOf(bob), shares);
         assertEq(vault.balanceOf(alice), 0);
     }
@@ -79,7 +82,7 @@ contract DepositTest is BaseTest {
     function test_deposit_dustSkipsFeeTransfer() public {
         _fundAndApprove(alice, 333);
         vm.prank(alice);
-        (uint256 shares, uint256 fee) = router.deposit(address(vault), 333, 0, alice, block.timestamp, 0);
+        (uint256 shares, uint256 fee) = router.deposit(address(vault), 333, 0, alice, block.timestamp, 0, bytes32(0));
         assertEq(fee, 0);
         assertEq(shares, 333);
         assertEq(usdc.balanceOf(feeRecipient), 0);
@@ -90,7 +93,7 @@ contract DepositTest is BaseTest {
         router = _deployRouter(tiers, defaultPools());
         _fundAndApprove(alice, 1_000e6);
         vm.prank(alice);
-        (, uint256 fee) = router.deposit(address(vault), 1_000e6, 0, alice, block.timestamp, 0);
+        (, uint256 fee) = router.deposit(address(vault), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
         assertEq(fee, 0);
         assertEq(vault.totalAssets(), 1_000e6);
     }
@@ -103,7 +106,8 @@ contract DepositTest is BaseTest {
 
         _fundAndApprove(alice, amount);
         vm.prank(alice);
-        (uint256 shares, uint256 fee) = router.deposit(pool, amount, expectedShares, receiver, block.timestamp, 0);
+        (uint256 shares, uint256 fee) =
+            router.deposit(pool, amount, expectedShares, receiver, block.timestamp, 0, bytes32(0));
 
         assertEq(fee, expectedFee);
         assertEq(shares, expectedShares);
@@ -128,16 +132,17 @@ contract DepositTest is BaseTest {
             vault.previewDeposit(amount - expectedFee),
             tier,
             bps,
-            0
+            0,
+            bytes32(0)
         );
         vm.prank(user);
-        (, uint256 fee) = router.deposit(address(vault), amount, 0, user, block.timestamp, 0);
+        (, uint256 fee) = router.deposit(address(vault), amount, 0, user, block.timestamp, 0, bytes32(0));
         assertEq(fee, expectedFee);
     }
 
     // ───────────── Events ─────────────
 
-    function test_deposit_event_withReferral() public {
+    function test_deposit_event_withReferralAndUserRef() public {
         _fundAndApprove(alice, 1_000e6);
         vm.expectEmit(true, true, true, true, address(router));
         emit IRestakeRouter.Deposit(
@@ -151,20 +156,32 @@ contract DepositTest is BaseTest {
             vault18.previewDeposit(997e6),
             0,
             30,
-            REFERRAL
+            REFERRAL,
+            USER_REF
         );
         vm.prank(alice);
-        router.deposit(address(vault18), 1_000e6, 0, bob, block.timestamp, REFERRAL);
+        router.deposit(address(vault18), 1_000e6, 0, bob, block.timestamp, REFERRAL, USER_REF);
     }
 
     function test_deposit_event_noReferral() public {
         _fundAndApprove(alice, 200_000e6);
         vm.expectEmit(true, true, true, true, address(router));
         emit IRestakeRouter.Deposit(
-            alice, alice, address(aToken), address(usdc), 200_000e6, 200e6, 199_800e6, 199_800e6, 2, 10, bytes32(0)
+            alice,
+            alice,
+            address(aToken),
+            address(usdc),
+            200_000e6,
+            200e6,
+            199_800e6,
+            199_800e6,
+            2,
+            10,
+            bytes32(0),
+            bytes32(0)
         );
         vm.prank(alice);
-        router.deposit(address(aToken), 200_000e6, 0, alice, block.timestamp, bytes32(0));
+        router.deposit(address(aToken), 200_000e6, 0, alice, block.timestamp, bytes32(0), bytes32(0));
     }
 
     // ───────────── Reverts ─────────────
@@ -174,20 +191,20 @@ contract DepositTest is BaseTest {
         uint256 shares = vault.previewDeposit(997e6);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.SlippageExceeded.selector, shares, shares + 1));
         vm.prank(alice);
-        router.deposit(address(vault), 1_000e6, shares + 1, alice, block.timestamp, 0);
+        router.deposit(address(vault), 1_000e6, shares + 1, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_deadline() public {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(IRestakeRouter.DeadlineExpired.selector);
         vm.prank(alice);
-        router.deposit(address(vault), 1_000e6, 0, alice, block.timestamp - 1, 0);
+        router.deposit(address(vault), 1_000e6, 0, alice, block.timestamp - 1, 0, bytes32(0));
     }
 
     function test_revert_zeroAmount() public {
         vm.expectRevert(IRestakeRouter.ZeroAmount.selector);
         vm.prank(alice);
-        router.deposit(address(vault), 0, 0, alice, block.timestamp, 0);
+        router.deposit(address(vault), 0, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_unregisteredPool() public {
@@ -195,7 +212,7 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.PoolNotRegistered.selector, address(unknown)));
         vm.prank(alice);
-        router.deposit(address(unknown), 1_000e6, 0, alice, block.timestamp, 0);
+        router.deposit(address(unknown), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_invalidReceiver() public {
@@ -204,7 +221,7 @@ contract DepositTest is BaseTest {
         for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.InvalidReceiver.selector, bad[i]));
             vm.prank(alice);
-            router.deposit(address(vault), 1_000e6, 0, bad[i], block.timestamp, 0);
+            router.deposit(address(vault), 1_000e6, 0, bad[i], block.timestamp, 0, bytes32(0));
         }
     }
 
@@ -214,11 +231,11 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.DepositsDisabled.selector, address(vault)));
         vm.prank(alice);
-        router.deposit(address(vault), 1_000e6, 0, alice, block.timestamp, 0);
+        router.deposit(address(vault), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
 
         // Other pools are unaffected.
         vm.prank(alice);
-        router.deposit(address(vault18), 1_000e6, 0, alice, block.timestamp, 0);
+        router.deposit(address(vault18), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_allDepositsDisabled() public {
@@ -227,7 +244,7 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(IRestakeRouter.AllDepositsAreDisabled.selector);
         vm.prank(alice);
-        router.deposit(address(aToken), 1_000e6, 0, alice, block.timestamp, 0);
+        router.deposit(address(aToken), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_feeOnTransferUnderlying() public {
@@ -243,7 +260,7 @@ contract DepositTest is BaseTest {
         fot.approve(address(r), 1_000e6);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.UnexpectedTransferAmount.selector, 1_000e6, 990e6));
         vm.prank(alice);
-        r.deposit(address(fotVault), 1_000e6, 0, alice, block.timestamp, 0);
+        r.deposit(address(fotVault), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_vaultTakesLessThanNet() public {
@@ -255,7 +272,7 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.UnexpectedTransferAmount.selector, 997e6, 498.5e6));
         vm.prank(alice);
-        router.deposit(address(lossy), 1_000e6, 0, alice, block.timestamp, 0);
+        router.deposit(address(lossy), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     function test_revert_reentrancy() public {
@@ -268,7 +285,7 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
         vm.prank(alice);
-        router.deposit(address(evil), 1_000e6, 0, alice, block.timestamp, 0);
+        router.deposit(address(evil), 1_000e6, 0, alice, block.timestamp, 0, bytes32(0));
     }
 
     /// @dev Invariant 1: a standing approval can only be spent by its owner.
@@ -276,7 +293,7 @@ contract DepositTest is BaseTest {
         _fundAndApprove(alice, 1_000e6);
         vm.expectRevert(); // bob has no USDC / allowance
         vm.prank(bob);
-        router.deposit(address(vault), 1_000e6, 0, bob, block.timestamp, 0);
+        router.deposit(address(vault), 1_000e6, 0, bob, block.timestamp, 0, bytes32(0));
         assertEq(usdc.balanceOf(alice), 1_000e6);
     }
 

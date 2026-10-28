@@ -115,7 +115,7 @@ sequenceDiagram
     participant Vault as ERC-4626 Vault
 
     User->>USDC: approve(Router, amount)   (batch call 1)
-    User->>Router: deposit(vault, amount, minShares, receiver, deadline, referralCode)   (batch call 2)
+    User->>Router: deposit(vault, amount, minShares, receiver, deadline, referralCode, partnerUserRef)   (batch call 2)
     Router->>Router: check deadline, pool known, deposits not disabled
     Router->>USDC: transferFrom(User, Router, amount)
     Router->>Router: tier = tierFor(asset, amount)<br/>fee = amount * bps / 10000
@@ -140,7 +140,7 @@ sequenceDiagram
     participant Router
 
     User->>Vault: approve(Router, shares)   (batch call 1)
-    User->>Router: withdraw(vault, shares, minAssets, receiver, deadline)   (batch call 2)
+    User->>Router: withdraw(vault, shares, minAssets, receiver, deadline, partnerUserRef)   (batch call 2)
     Router->>Router: check deadline, pool is known (disabled is OK)
     Router->>Vault: transferFrom(User, Router, shares)
     Router->>Vault: redeem(shares, receiver, Router)
@@ -156,7 +156,7 @@ Design choice: the router **pulls the shares and redeems as owner**, rather than
 ### 4.4 Withdraw (Aave V3)
 
 1. The user approves aTokens to the router.
-2. `withdraw(aToken, amount, minAssets, receiver, deadline)` is called.
+2. `withdraw(aToken, amount, minAssets, receiver, deadline, partnerUserRef)` is called.
 3. The router pulls the aTokens using a **balance-delta** measurement, because aToken transfers can be off by 1 wei due to scaled-balance rounding.
 4. The router calls `AAVE_POOL.withdraw(asset, received, receiver)`.
 
@@ -173,7 +173,7 @@ Passing `shares == type(uint256).max` means "withdraw my whole balance". The rou
 
 #### `depositWithPermit` (deposit only)
 
-Native USDC implements EIP-2612, so a deposit needs no prior `approve` transaction. `depositWithPermit(pool, assets, minShares, receiver, deadline, referralCode, v, r, s)`:
+Native USDC implements EIP-2612, so a deposit needs no prior `approve` transaction. `depositWithPermit(pool, assets, minShares, receiver, deadline, referralCode, partnerUserRef, v, r, s)`:
 
 1. Calls `USDC.permit(msg.sender, router, assets, deadline, v, r, s)`. The permit **owner is always `msg.sender`**, so invariant 1 still holds: a third party holding someone else's signature can't spend their USDC through the router.
 2. Runs the same code path as `deposit`.
@@ -187,7 +187,7 @@ Design points:
 - **ECDSA signatures only.** This is the standard `(v, r, s)` EIP-2612 permit, which suits EOAs and MPC wallets. Smart-contract wallets (Safe, ERC-1271) should batch `approve` + `deposit` instead (§4.6, row 1). USDC's non-standard `bytes signature` overload isn't used.
 - **No permit on withdrawals.** Not every share token supports permit, so withdrawals keep the same `approve` + `withdraw` flow for every pool.
 
-### 4.7 Referral codes
+### 4.7 Referral codes and partner user references
 
 `deposit` takes a `bytes32 referralCode`, which the router emits unchanged in the `Deposit` event.
 
@@ -195,6 +195,13 @@ Design points:
 - **Unvalidated.** Any value is accepted; `bytes32(0)` means "no referral". There's no on-chain registry, which keeps the router free of admin state. The subgraph and backend map codes to partners and ignore unknown codes.
 - **Encoding.** The frontend and partners agree on one format, e.g. a short ASCII tag right-padded to 32 bytes, or `keccak256(partnerId)`.
 - **Not on withdrawals.** Withdrawals carry no fee, so there's nothing to attribute.
+
+Deposits and withdrawals (including `depositWithPermit`, the CCTP hook and `withdrawAndBridge`) also take a `bytes32 partnerUserRef`, emitted unchanged in `Deposit` and `Withdraw`.
+
+- **Why.** An omnibus partner deposits and withdraws from one wallet on behalf of many end users, so `sender` and `receiver` can't tell those users apart. The partner sets `partnerUserRef` to identify the end user and matches its own deposits and withdrawals to that user from the events.
+- **Separate from `referralCode`.** The referral code says *which partner* brought the deposit; `partnerUserRef` says *which of the partner's users* it belongs to. Keeping both lets a partner be attributed and reconcile per user at the same time.
+- **Tracking only, unvalidated.** Same rules as the referral code: any value, `bytes32(0)` = none, no effect on fees, shares or where funds go. The router doesn't link a withdrawal's reference to the deposit's; that matching is the partner's.
+- **Encoding.** Chosen by the partner. A salted hash (e.g. `keccak256(salt, userId)`) keeps internal user IDs off-chain, since every event is public.
 
 ### 4.8 Cross-chain deposits and withdrawals (CCTP V2)
 
@@ -214,7 +221,7 @@ The CCTP addresses are `immutable`: `CCTP_TOKEN_MESSENGER` comes from the constr
    - `destinationDomain = 6` (Base)
    - `mintRecipient = bytes32(router)`
    - `destinationCaller = bytes32(router)`
-   - `hookData = abi.encode(CctpDepositHook{pool, minShares, receiver, deadline, referralCode})`, exactly 160 bytes
+   - `hookData = abi.encode(CctpDepositHook{pool, minShares, receiver, deadline, referralCode, partnerUserRef})`, exactly 192 bytes
    - `maxFee` / `minFinalityThreshold`: 1000 for fast or 2000 for standard finality
 2. **Attestation.** A relayer (our backend, or anyone) fetches the attestation from Circle's Iris API.
 3. **Base.** The relayer calls `router.receiveAndDeposit(message, attestation)`. The router:
@@ -239,7 +246,7 @@ Refunds pay out on Base rather than bouncing back over CCTP, because a burn can 
 
 #### Outbound: Base withdrawal → other chain
 
-`withdrawAndBridge(pool, shares, minAssets, deadline, CctpBridge{destinationDomain, mintRecipient, maxFee, minFinalityThreshold})`:
+`withdrawAndBridge(pool, shares, minAssets, deadline, partnerUserRef, CctpBridge{destinationDomain, mintRecipient, maxFee, minFinalityThreshold})`:
 
 1. Runs the same redeem path as `withdraw`, with the router as the USDC receiver. It supports `shares = max`, requires `minAssets > 0`, and checks the USDC delta.
 2. Approves `TokenMessengerV2` for exactly the redeemed amount, calls `depositForBurn` with `destinationCaller = 0`, then resets the approval to 0.
@@ -367,6 +374,7 @@ interface IRestakeRouter {
     ///         deposit the rest into `pool`, and send the shares / aTokens to `receiver`.
     /// @param referralCode Opaque partner / referrer tag, emitted in `Deposit`. `bytes32(0)` = no referral.
     ///                     Tracking only: it doesn't change the fee or where it goes.
+    /// @param partnerUserRef Opaque per-user tag set by an omnibus partner, emitted in `Deposit` (§4.7).
     /// @return shares     Shares (or aTokens) received by `receiver`.
     /// @return fee        Fee sent to FEE_RECIPIENT.
     function deposit(
@@ -375,7 +383,8 @@ interface IRestakeRouter {
         uint256 minShares,
         address receiver,
         uint256 deadline,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     ) external returns (uint256 shares, uint256 fee);
 
     /// @notice `deposit` without a prior `approve`: first applies msg.sender's EIP-2612 USDC permit for exactly
@@ -387,6 +396,7 @@ interface IRestakeRouter {
         address receiver,
         uint256 deadline,
         bytes32 referralCode,
+        bytes32 partnerUserRef,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -395,10 +405,16 @@ interface IRestakeRouter {
     /// @notice Pull `shares` (or aTokens) from msg.sender, redeem them, and send the underlying to `receiver`.
     /// @param shares Pass type(uint256).max to withdraw msg.sender's full balance.
     /// @param minAssets Must be > 0, so a queued (async) redeem reverts instead of completing silently.
+    /// @param partnerUserRef Same as in `deposit`, emitted in `Withdraw` (§4.7).
     /// @return assets Underlying received by `receiver`.
-    function withdraw(address pool, uint256 shares, uint256 minAssets, address receiver, uint256 deadline)
-        external
-        returns (uint256 assets);
+    function withdraw(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        uint256 deadline,
+        bytes32 partnerUserRef
+    ) external returns (uint256 assets);
 
     /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
@@ -469,7 +485,8 @@ event Deposit(
     uint256 shares,             // shares / aTokens received by the receiver
     uint8   tierIndex,          // applied fee tier
     uint16  feeBps,             // applied fee rate
-    bytes32 referralCode        // caller-supplied tag, bytes32(0) = none
+    bytes32 referralCode,       // caller-supplied tag, bytes32(0) = none
+    bytes32 partnerUserRef      // omnibus partner's per-user tag, bytes32(0) = none (§4.7)
 );
 
 event Withdraw(
@@ -478,7 +495,8 @@ event Withdraw(
     address indexed pool,
     address asset,
     uint256 shares,             // shares / aTokens spent
-    uint256 assets              // underlying sent to the receiver
+    uint256 assets,             // underlying sent to the receiver
+    bytes32 partnerUserRef      // omnibus partner's per-user tag, bytes32(0) = none (§4.7)
 );
 
 // Config events, emitted from the constructor
@@ -673,6 +691,6 @@ restake-router-defi/
 | Withdraw | Partial, full (`max`), aToken rebasing dust, Sky `sUSDC` redeem with PSM3 short on USDC, YO queued redeem reverts, works while deposits are disabled, slippage revert. |
 | Guardian | Only the guardian can disable; nothing can re-enable; withdrawals unaffected. |
 | Invariants | The router's token balances stay 0 and the router's allowances stay 0 across random action sequences. |
-| Events | Exact field assertions with `vm.expectEmit`, including `referralCode` (zero and non-zero). |
+| Events | Exact field assertions with `vm.expectEmit`, including `referralCode` and `partnerUserRef` (zero and non-zero). |
 
 ---

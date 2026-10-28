@@ -35,7 +35,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     uint256 private constant MSG_MESSAGE_SENDER = 148 + 100;
     // slither-disable-end unused-state
     uint256 private constant MSG_HOOK_DATA = 148 + 228;
-    uint256 private constant HOOK_LENGTH = 5 * 32;
+    uint256 private constant HOOK_LENGTH = 6 * 32;
 
     address public immutable FEE_RECIPIENT;
     address public immutable GUARDIAN;
@@ -114,9 +114,10 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 minShares,
         address receiver,
         uint256 deadline,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     ) external nonReentrant returns (uint256 shares, uint256 fee) {
-        return _deposit(pool, assets, minShares, receiver, deadline, referralCode);
+        return _deposit(pool, assets, minShares, receiver, deadline, referralCode, partnerUserRef);
     }
 
     /// @inheritdoc IRestakeRouter
@@ -127,6 +128,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         address receiver,
         uint256 deadline,
         bytes32 referralCode,
+        bytes32 partnerUserRef,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -134,18 +136,21 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         // A front-run permit (same signature submitted first) reverts on the used nonce but has already set
         // the allowance, so failures are ignored; `_pullExact` reverts if the allowance isn't there.
         try IERC20Permit(USDC).permit(msg.sender, address(this), assets, deadline, v, r, s) {} catch {}
-        return _deposit(pool, assets, minShares, receiver, deadline, referralCode);
+        return _deposit(pool, assets, minShares, receiver, deadline, referralCode, partnerUserRef);
     }
 
     /// @inheritdoc IRestakeRouter
-    function withdraw(address pool, uint256 shares, uint256 minAssets, address receiver, uint256 deadline)
-        external
-        nonReentrant
-        returns (uint256 assets)
-    {
+    function withdraw(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        uint256 deadline,
+        bytes32 partnerUserRef
+    ) external nonReentrant returns (uint256 assets) {
         PoolType pType = _checkAction(pool, receiver, deadline);
         (shares, assets) = _withdrawTo(pType, pool, shares, minAssets, receiver);
-        emit Withdraw(msg.sender, receiver, pool, USDC, shares, assets);
+        emit Withdraw(msg.sender, receiver, pool, USDC, shares, assets, partnerUserRef);
     }
 
     // ───────────── CCTP ─────────────
@@ -162,7 +167,9 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
         PoolType pType = _checkAction(hook.pool, hook.receiver, hook.deadline);
         _checkDepositsOpen(hook.pool);
-        (shares, fee) = _depositHeld(pType, hook.pool, assets, hook.minShares, hook.receiver, hook.referralCode);
+        (shares, fee) = _depositHeld(
+            pType, hook.pool, assets, hook.minShares, hook.receiver, hook.referralCode, hook.partnerUserRef
+        );
     }
 
     /// @inheritdoc IRestakeRouter
@@ -197,6 +204,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 shares,
         uint256 minAssets,
         uint256 deadline,
+        bytes32 partnerUserRef,
         CctpBridge calldata bridge
     ) external nonReentrant returns (uint256 assets) {
         address tokenMessenger = CCTP_TOKEN_MESSENGER;
@@ -228,7 +236,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
             );
         usdc.forceApprove(tokenMessenger, 0);
 
-        emit Withdraw(msg.sender, address(this), pool, USDC, shares, assets);
+        emit Withdraw(msg.sender, address(this), pool, USDC, shares, assets, partnerUserRef);
         emit CctpBridged(
             msg.sender,
             bridge.destinationDomain,
@@ -331,14 +339,15 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 minShares,
         address receiver,
         uint256 deadline,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     ) private returns (uint256 shares, uint256 fee) {
         PoolType pType = _checkAction(pool, receiver, deadline);
         if (assets == 0) revert ZeroAmount();
         _checkDepositsOpen(pool);
 
         _pullExact(IERC20(USDC), assets);
-        (shares, fee) = _depositHeld(pType, pool, assets, minShares, receiver, referralCode);
+        (shares, fee) = _depositHeld(pType, pool, assets, minShares, receiver, referralCode, partnerUserRef);
     }
 
     function _checkDepositsOpen(address pool) private view {
@@ -353,7 +362,8 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 assets,
         uint256 minShares,
         address receiver,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     ) private returns (uint256 shares, uint256 fee) {
         uint8 tierIndex;
         uint16 feeBps;
@@ -362,7 +372,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         shares = _supply(pType, pool, assets - fee, receiver);
         if (shares < minShares) revert SlippageExceeded(shares, minShares);
 
-        _emitDeposit(receiver, pool, assets, fee, shares, tierIndex, feeBps, referralCode);
+        _emitDeposit(receiver, pool, assets, fee, shares, tierIndex, feeBps, referralCode, partnerUserRef);
     }
 
     /// @dev Redeems msg.sender's `shares` (max = full balance) and sends the USDC to `receiver`.
@@ -428,8 +438,14 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     ///      words and a receiver `_checkAction` would accept, so a refund can always pick a destination.
     function _decodeHook(bytes calldata hookData) private view returns (CctpDepositHook memory hook, bool valid) {
         if (hookData.length != HOOK_LENGTH) return (hook, valid);
-        (uint256 pool, uint256 minShares, uint256 receiver, uint256 deadline, bytes32 referralCode) =
-            abi.decode(hookData, (uint256, uint256, uint256, uint256, bytes32));
+        (
+            uint256 pool,
+            uint256 minShares,
+            uint256 receiver,
+            uint256 deadline,
+            bytes32 referralCode,
+            bytes32 partnerUserRef
+        ) = abi.decode(hookData, (uint256, uint256, uint256, uint256, bytes32, bytes32));
         if (pool > type(uint160).max || receiver > type(uint160).max) return (hook, valid);
         hook = CctpDepositHook({
             // forge-lint: disable-next-line(unsafe-typecast) range-checked above
@@ -438,7 +454,8 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
             // forge-lint: disable-next-line(unsafe-typecast) range-checked above
             receiver: address(uint160(receiver)),
             deadline: deadline,
-            referralCode: referralCode
+            referralCode: referralCode,
+            partnerUserRef: partnerUserRef
         });
         valid = hook.receiver != address(0) && hook.receiver != address(this) && hook.receiver != hook.pool;
     }
@@ -456,7 +473,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         if (received != amount) revert UnexpectedTransferAmount(amount, received);
     }
 
-    /// @dev Split out of `deposit` to keep its stack shallow (the event has 11 fields).
+    /// @dev Split out of `deposit` to keep its stack shallow (the event has 12 fields).
     function _emitDeposit(
         address receiver,
         address pool,
@@ -465,10 +482,22 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 shares,
         uint8 tierIndex,
         uint16 feeBps,
-        bytes32 referralCode
+        bytes32 referralCode,
+        bytes32 partnerUserRef
     ) private {
         emit Deposit(
-            msg.sender, receiver, pool, USDC, assets, fee, assets - fee, shares, tierIndex, feeBps, referralCode
+            msg.sender,
+            receiver,
+            pool,
+            USDC,
+            assets,
+            fee,
+            assets - fee,
+            shares,
+            tierIndex,
+            feeBps,
+            referralCode,
+            partnerUserRef
         );
     }
 
