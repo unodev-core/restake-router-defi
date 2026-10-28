@@ -72,7 +72,7 @@ Because the router is non-custodial (users hold their own shares and aTokens), a
 
 ```mermaid
 flowchart LR
-    U[User wallet<br/>EOA / Smart Wallet] -- approve / permit --> T[(USDC / share token / aToken)]
+    U[User wallet<br/>EOA / Smart Wallet] -- approve --> T[(USDC / share token / aToken)]
     U -- deposit / withdraw --> R[RestakeRouter<br/>immutable, no owner]
     R -- fee --> F[FEE_RECIPIENT<br/>immutable]
     R -- deposit / redeem --> V[ERC-4626 vaults<br/>Sky sUSDC, Morpho, Fluid, YO, AUTO, Veranta]
@@ -169,14 +169,13 @@ Passing `shares == type(uint256).max` means "withdraw my whole balance". The rou
 | Wallet type | Flow |
 |---|---|
 | Smart wallets (Coinbase Smart Wallet, Safe, 7702-delegated EOAs) | `wallet_sendCalls` (EIP-5792) with `[approve, deposit]` in **one user confirmation**. |
-| Plain EOAs (with permit-capable tokens) | `depositWithPermit` / `withdrawWithPermit`, which takes an EIP-2612 signature in **one transaction**. USDC on Base and Aave aTokens support EIP-2612; check each share token. |
-| Plain EOAs (no permit) | Two transactions: `approve`, then `deposit`. |
+| Plain EOAs | Two transactions: `approve`, then `deposit` (or `withdraw`). |
 
-The permit call is wrapped in `try/catch`. If someone front-runs the permit, the deposit still goes through as long as the allowance is already in place, so nobody can grief it.
+The router has no permit (EIP-2612) entry points. Not every share token supports permit, so every pool uses the same `approve` + `deposit` / `withdraw` flow.
 
 ### 4.7 Referral codes
 
-`deposit` and `depositWithPermit` take a `bytes32 referralCode`, which the router emits unchanged in the `Deposit` event.
+`deposit` takes a `bytes32 referralCode`, which the router emits unchanged in the `Deposit` event.
 
 - **Tracking only.** The code doesn't change the fee tier, the fee amount, or where the fee goes. Every fee still goes to `FEE_RECIPIENT`. Revenue sharing with referrers is settled off-chain from subgraph data.
 - **Unvalidated.** Any value is accepted; `bytes32(0)` means "no referral". There's no on-chain registry, which keeps the router free of admin state. The subgraph and backend map codes to partners and ignore unknown codes.
@@ -214,9 +213,9 @@ mapping(address pool => bool) public depositsDisabled;  // guardian kill switch,
 | # | Protocol | Pool (key) | Type | Asset | Notes |
 |---|---|---|---|---|---|
 | 1 | Sky | sUSDC `0x3128a0f7f0ea68e7b7c9b00afa7e41045828e858` | ERC4626 | USDC | On-chain name **"Spark USDC Vault"** (symbol `sUSDC`): an ERC-4626 wrapper that routes USDC into sUSDS via PSM3, so the router treats it as a plain vault. `asset() == USDC`; shares have **18 decimals** (USDC has 6). `maxDeposit` is capped (~653K USDC of room at time of check). Withdrawals depend on PSM3 USDC liquidity. |
-| 2 | Morpho | Vault USDC `TBD` | ERC4626 | USDC | Choose curator (Gauntlet / Steakhouse / …). |
-| 3 | Fluid | fUSDC `TBD` | ERC4626 | USDC | |
-| 4 | Aave V3 | aBasUSDC `TBD` | AAVE_V3 | USDC | Aave Pool `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` (verify). |
+| 2 | Morpho | 8 USDC vaults (6 Vault V2, 2 Vault V1): Steakhouse Prime `0xbeef0e0834849acc03f0089f01f4f1eeb06873c9`, Gauntlet Prime (V2) `0x050ce30b927da55177a4914ec73480238bad56f0`, Gauntlet Frontier `0x1deefabee758aabdc29a542b24ca3b75afd56765`, Steakhouse High Yield `0xbeeff7ae5e00aae3db302e4b0d8c883810a58100`, Grove x Steakhouse `0xbeef0786756810478b88982de00f3cd7fdb8e7c7`, Clearstar cbAssets `0x91c056b6d4311a743614fbc03ac32d4e6a2d3a3c`, Gauntlet USDC Prime (V1) `0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61`, Spark USDC Vault (V1) `0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a` | ERC4626 | USDC | All shares have 18 decimals. For Vault V2, confirm that no deposit/receive gates are set (they would block the router or the receiver). The Morpho "Spark USDC Vault" is a different contract from Sky's sUSDC (#1). |
+| 3 | Fluid | fUSDC `0xf42f5795d9ac7e9d757db633d693cd548cfd9169` | ERC4626 | USDC | 6 decimals. |
+| 4 | Aave V3 | aBasUSDC `0x4e65fe4dba92790696d040ac24aa414708f5c0ab` | AAVE_V3 | USDC | Aave Pool `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` (verify). |
 | 5 | YO Protocol | yoUSD `0x0000000f2eb9f69274678c76222b35eec7588a65` | ERC4626 | USDC | On-chain: name/symbol `yoUSD`, `asset() == USDC`, 6 decimals, `maxDeposit` uncapped. Redeem is async without idle liquidity (§8). YO Gateway `0xF1EeE0957267b1A474323Ff9CfF7719E964969FA` (per Base docs, verify). |
 | 6 | AUTO Finance | baseUSD Autopool `0x9c6864105aec23388c89600046213a44c384c831` | ERC4626 | USDC | Formerly Tokemak: the on-chain name is still **"Tokemak baseUSD"** (symbol `baseUSD`). `asset() == USDC`; shares have **18 decimals** (USDC has 6). `maxDeposit` effectively uncapped. |
 | 7 | Veranta | avUSDC `0x944766f715b51967e56afde5f0aa76ceacc9e7f9` | ERC4626 | USDC | Formerly Avantis: the on-chain name is still **"Avantis USDC Vault"** (symbol `avUSDC`). `asset() == USDC`, 6 decimals, `maxDeposit` is capped (finite). Confirm withdrawal behavior (`maxWithdraw` / `maxRedeem`, any lock or epoch). |
@@ -293,14 +292,6 @@ interface IRestakeRouter {
         PoolType poolType;
     }
 
-    struct PermitParams {
-        uint256 value;
-        uint256 deadline;
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-    }
-
     // ───────────── User actions ─────────────
 
     /// @notice Pull `assets` of the pool's underlying from msg.sender, take the tiered fee,
@@ -318,16 +309,6 @@ interface IRestakeRouter {
         bytes32 referralCode
     ) external returns (uint256 shares, uint256 fee);
 
-    function depositWithPermit(
-        address pool,
-        uint256 assets,
-        uint256 minShares,
-        address receiver,
-        uint256 deadline,
-        bytes32 referralCode,
-        PermitParams calldata permit
-    ) external returns (uint256 shares, uint256 fee);
-
     /// @notice Pull `shares` (or aTokens) from msg.sender, redeem them, and send the underlying to `receiver`.
     /// @param shares Pass type(uint256).max to withdraw msg.sender's full balance.
     /// @param minAssets Must be > 0, so a queued (async) redeem reverts instead of completing silently.
@@ -335,15 +316,6 @@ interface IRestakeRouter {
     function withdraw(address pool, uint256 shares, uint256 minAssets, address receiver, uint256 deadline)
         external
         returns (uint256 assets);
-
-    function withdrawWithPermit(
-        address pool,
-        uint256 shares,
-        uint256 minAssets,
-        address receiver,
-        uint256 deadline,
-        PermitParams calldata permit
-    ) external returns (uint256 assets);
 
     /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
@@ -489,7 +461,6 @@ Notes for the indexer:
 | Fee-on-transfer / rebasing underlying | The underlying pull is balance-delta checked: revert if `received != assets`. aTokens get special handling (§4.4). |
 | Non-standard ERC-20s (USDT-like approvals) | OZ `SafeERC20` (`safeTransferFrom`, `forceApprove`). |
 | Stale approvals to vaults / Aave Pool | Approve exactly the amount used and reset to 0 after the call. |
-| Permit front-running griefing | `try permit {} catch {}`, then rely on the existing allowance. |
 | Malicious config change | Not possible: there are no config setters and no owner. Bad config can only come from the deployment itself, which is fork-tested and checked in review (§10). |
 | Compromised guardian | Can only disable deposits, irreversibly. Funds are never at risk; recovery is a redeploy. |
 | Compromised deployer key | Can't touch any deployed router. It **can** claim the router address on a chain we haven't deployed to yet, with a malicious config. Keep the deployer EOA cold; the frontend allowlists `(chainId, router)` pairs instead of trusting the address alone. |
@@ -521,9 +492,29 @@ A CREATE2 address is `keccak(factory, salt, keccak(initCode))`, and `initCode` i
 
 ### Flow
 
-1. Write `script/config/<chainId>.json` with `feeRecipient`, `guardian`, `aavePool`, `feeTiers[]` and `pools[]`.
+1. Fill in the chain's entry in `script/config/constructor-config.v1.json` (format below).
 2. Run the fork test for that chain config (`test/fork/Deploy.t.sol`), which performs the real deployment on a fork and checks every pool end to end.
 3. `script/Deploy.s.sol` reads the config, checks that `CreateX.computeCreate3Address(guardedSalt)` equals the expected router address, and calls `deployCreate3`.
+
+### Constructor config file
+
+There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited.
+
+| Path | Meaning |
+|---|---|
+| `release` | Release tag, e.g. `v1.0`. |
+| `deployment.createX` | CreateX factory address. |
+| `deployment.saltLabel` | Hashed into salt bytes 21–31: `bytes11(keccak256(saltLabel))`. |
+| `deployment.crossChainRedeployProtection` | Salt byte 20 (`false` → `0x00`). |
+| `chains.<name>.chainId` | The script picks the entry whose `chainId == block.chainid` (it iterates over `vm.parseJsonKeys(".chains")`). |
+| `chains.<name>.deployer` | Salt bytes 0–19. The script reverts unless it equals the broadcasting address. |
+| `chains.<name>.expectedRouter` | Must equal `computeCreate3Address(guardedSalt)`. Identical across chains for one release. |
+| `chains.<name>.constructor.feeRecipient` / `guardian` / `usdc` / `aavePool` | Constructor arguments 1–4. |
+| `chains.<name>.constructor.feeTiers[]` | `{ minAmount, feeBps }` in raw USDC units → `FeeTier[]`. `name` is just a label. |
+| `chains.<name>.constructor.pools[]` | `{ pool, poolType }` → `PoolInit[]`. `poolType` is the enum name (`"ERC4626"` / `"AAVE_V3"`). `protocol` and `name` are labels; `slug` matches the pool's slug in the backend database seed. |
+| `pools[].verified` | Set to `true` only after the onboarding checklist (§8) is done. The script reverts on any `false`. |
+
+Placeholders are the zero address, so a missed value fails loudly in the script or the constructor. The script reads every field by key (`vm.parseJsonAddress`, `vm.parseJsonUint`, …) rather than `abi.decode`-ing whole objects, so field order and label fields don't matter.
 4. Verify the source on Basescan with the same compiler settings.
 
 ### Versioning
@@ -557,7 +548,7 @@ restake-router-defi/
 │   └── invariant/                  // router-holds-nothing, fee bounds
 ├── script/
 │   ├── config/
-│   │   └── 8453.json               // Base config: pools, tiers, addresses
+│   │   └── constructor-config.v1.json  // per-chain constructor args + CreateX salt inputs
 │   └── Deploy.s.sol                // CreateX deployCreate3 with permissioned salt
 ├── subgraph/                       // schema.graphql, mappings, subgraph.yaml
 └── foundry.toml
@@ -565,7 +556,7 @@ restake-router-defi/
 
 - **Solidity** `0.8.28`, `evmVersion = cancun`.
 - **Foundry** for building, unit tests, fuzzing and fork tests (`--fork-url $BASE_RPC_URL`).
-- **OpenZeppelin Contracts v5**: `ReentrancyGuardTransient`, `SafeERC20`, `IERC4626`, `IERC20Permit`.
+- **OpenZeppelin Contracts v5**: `ReentrancyGuardTransient`, `SafeERC20`, `IERC4626`.
 - **Static analysis**: Slither and Aderyn in CI.
 - **Audit**: at least one external audit before mainnet, plus a guarded launch.
 
@@ -576,7 +567,7 @@ restake-router-defi/
 | Fee math | Fuzz `tierFor` and `fee` at tier boundaries (`minAmount - 1`, `minAmount`, `minAmount + 1`); `fee + net == gross`; fee ≤ cap. |
 | Constructor | Fee tier validation (empty, unsorted, first ≠ 0, above cap, > MAX_TIERS); pool checks for both types; non-USDC pool rejected; duplicate pools; missing Aave Pool for `AAVE_V3` pools; config events emitted. |
 | Deployment | Same address predicted and deployed via CreateX on a fork; a different deployer can't use the salt. |
-| Deposit | Each pool on a Base fork: happy path, `receiver ≠ sender`, slippage revert, disabled revert, deadline revert, permit path, front-run permit. |
+| Deposit | Each pool on a Base fork: happy path, `receiver ≠ sender`, slippage revert, disabled revert, deadline revert. |
 | Withdraw | Partial, full (`max`), aToken rebasing dust, Sky `sUSDC` redeem with PSM3 short on USDC, YO queued redeem reverts, works while deposits are disabled, slippage revert. |
 | Guardian | Only the guardian can disable; nothing can re-enable; withdrawals unaffected. |
 | Invariants | The router's token balances stay 0 and the router's allowances stay 0 across random action sequences. |

@@ -1,0 +1,141 @@
+{
+  "release": "v1.0",
+  "spec": "docs/architecture-v1.0.md",
+  "deployment": {
+    "createX": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+    "saltLabel": "restake.router.v1.0",
+    "crossChainRedeployProtection": false
+  },
+  "chains": {
+    "base": {
+      "chainId": 8453,
+      "deployer": "0x0000000000000000000000000000000000000000",
+      "expectedRouter": "0x0000000000000000000000000000000000000000",
+      "constructor": {
+        "feeRecipient": "0x0000000000000000000000000000000000000000",
+        "guardian": "0x0000000000000000000000000000000000000000",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "aavePool": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+        "feeTiers": [
+          { "name": "Standard", "minAmount": 0, "feeBps": 30 },
+          { "name": "Plus", "minAmount": 10000000000, "feeBps": 20 },
+          { "name": "Whale", "minAmount": 100000000000, "feeBps": 10 }
+        ],
+        "pools": [
+          {
+            "protocol": "Sky",
+            "name": "Spark Savings USDC (sUSDC)",
+            "slug": "sky-money-spark-susdc-base",
+            "pool": "0x3128a0f7f0ea68e7b7c9b00afa7e41045828e858",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho V2",
+            "name": "Steakhouse Prime USDC (steakUSDC)",
+            "slug": "morpho-v2-steakhouse-usdc-prime-base",
+            "pool": "0xbeef0e0834849acc03f0089f01f4f1eeb06873c9",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho V2",
+            "name": "Gauntlet Prime USDC (gtusdcp)",
+            "slug": "morpho-v2-gauntlet-usdc-prime-base",
+            "pool": "0x050ce30b927da55177a4914ec73480238bad56f0",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho V2",
+            "name": "Gauntlet Frontier USDC (gtusdcf)",
+            "slug": "morpho-v2-gauntlet-usdc-frontier-base",
+            "pool": "0x1deefabee758aabdc29a542b24ca3b75afd56765",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho V2",
+            "name": "Steakhouse High Yield USDC (bbqUSDC)",
+            "slug": "morpho-v2-stakehouse-usdc-high-base",
+            "pool": "0xbeeff7ae5e00aae3db302e4b0d8c883810a58100",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho V2",
+            "name": "Grove x Steakhouse USDC (grove-steakUSDC)",
+            "slug": "morpho-v2-grove-steakhouse-usdc-base",
+            "pool": "0xbeef0786756810478b88982de00f3cd7fdb8e7c7",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho V2",
+            "name": "Clearstar cbAssets USDC (CSCBUSDC)",
+            "slug": "morpho-v2-clearstar-cbassets-usdc-base",
+            "pool": "0x91c056b6d4311a743614fbc03ac32d4e6a2d3a3c",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho",
+            "name": "Gauntlet USDC Prime (gtUSDCp)",
+            "slug": "morpho-gauntlet-usdc-prime-base",
+            "pool": "0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Morpho",
+            "name": "Spark USDC Vault (sparkUSDC)",
+            "slug": "morpho-spark-usdc-base",
+            "pool": "0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Fluid",
+            "name": "fUSDC",
+            "slug": "fluid-usdc-base",
+            "pool": "0xf42f5795d9ac7e9d757db633d693cd548cfd9169",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Aave V3",
+            "name": "aBasUSDC",
+            "slug": "aave-v3-supply-usdc-base",
+            "pool": "0x4e65fe4dba92790696d040ac24aa414708f5c0ab",
+            "poolType": "AAVE_V3",
+            "verified": false
+          },
+          {
+            "protocol": "YO Protocol",
+            "name": "yoUSD",
+            "slug": "yo-protocol-usdc-base",
+            "pool": "0x0000000f2eb9f69274678c76222b35eec7588a65",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "AUTO Finance",
+            "name": "baseUSD Autopool",
+            "slug": "auto-finance-usdc-base",
+            "pool": "0x9c6864105aec23388c89600046213a44c384c831",
+            "poolType": "ERC4626",
+            "verified": false
+          },
+          {
+            "protocol": "Veranta",
+            "name": "avUSDC",
+            "slug": "veranta-vault-usdc-base",
+            "pool": "0x944766f715b51967e56afde5f0aa76ceacc9e7f9",
+            "poolType": "ERC4626",
+            "verified": false
+          }
+        ]
+      }
+    }
+  }
+}
