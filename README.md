@@ -23,6 +23,7 @@ The full design rationale is in [docs/architecture-v1.0.md](docs/architecture-v1
 - **Tiered deposit fee, no withdrawal fee.** The fee depends on the size of a single deposit, is capped at 1% (`MAX_FEE_BPS = 100`), rounds down in the user's favor, and always goes to `FEE_RECIPIENT`.
 - **Two integration shapes, handled inline.** A `PoolType` enum (`ERC4626`, `AAVE_V3`) selects the code path. There are no external adapters.
 - **Balance-delta accounting.** Shares, assets and pulled amounts are measured as balance changes, never taken from return values. This rejects fee-on-transfer tokens, catches vaults that misreport, and handles Aave's 1-wei rounding.
+- **One-transaction deposits with USDC permit.** `depositWithPermit` takes an EIP-2612 signature for exactly the deposit amount instead of a prior `approve`. This suits EOA and MPC omnibus wallets. The permit owner is always `msg.sender`, and a front-run permit doesn't break the deposit.
 - **User protection on every call:** `minShares` / `minAssets` slippage bounds, a `deadline`, `ReentrancyGuardTransient`, and exact-amount approvals that are reset to 0 after each call.
 - **Async redeems never get stuck.** `minAssets` must be greater than 0. If a vault queues a redeem instead of paying out (YO without idle liquidity), the whole transaction reverts and the shares stay with the user.
 - **"Withdraw all".** Passing `shares = type(uint256).max` withdraws the caller's full balance as read inside the transaction. This matters for rebasing aTokens, where an amount signed in the UI would leave dust.
@@ -227,6 +228,7 @@ These are checked by the invariant suite in [test/invariant/](test/invariant/):
 | AUTO baseUSD | The Autopool's `previewRedeem` changes state internally, so it reverts through the router's read-only `previewWithdraw`. Quote it by `eth_call`ing the vault's `previewRedeem` directly, and size `minAssets` with a tolerance. |
 | Veranta avUSDC | Charges about a 1.48% exit fee (`previewRedeem` < `convertToAssets`). Show it to the user. |
 | YO yoUSD | If a withdrawal reverts with `SlippageExceeded(0, …)`, the vault lacks idle liquidity. Fall back to the YO Gateway. |
+| `depositWithPermit` | Sign the EIP-2612 permit with `spender = router`, `value = assets`, and the same `deadline` as the deposit. ECDSA only: smart-contract wallets should batch `approve` + `deposit`. |
 | CCTP deposits | Set `destinationCaller = mintRecipient = router`. Size `minShares` from `amount − maxFee − router fee`, and give `deadline` enough slack for attestation: seconds for fast transfers, ~15–20 min for standard ones. |
 | CCTP withdrawals | The share owner on Base calls `withdrawAndBridge`. The destination needs a relayer (or the recipient) to call `receiveMessage` there; `destinationCaller` is 0. |
 | Aave aBasUSDC | For a full exit, pass `shares = max` and approve a buffer (or `max`), because the balance grows every block. |

@@ -169,9 +169,23 @@ Passing `shares == type(uint256).max` means "withdraw my whole balance". The rou
 | Wallet type | Flow |
 |---|---|
 | Smart wallets (Coinbase Smart Wallet, Safe, 7702-delegated EOAs) | `wallet_sendCalls` (EIP-5792) with `[approve, deposit]` in **one user confirmation**. |
-| Plain EOAs | Two transactions: `approve`, then `deposit` (or `withdraw`). |
+| Plain EOAs and MPC wallets (e.g. partner omnibus wallets) | **Deposit:** one transaction with `depositWithPermit`, using an off-chain EIP-2612 USDC signature. **Withdraw:** two transactions, `approve` then `withdraw`. |
 
-The router has no permit (EIP-2612) entry points. Not every share token supports permit, so every pool uses the same `approve` + `deposit` / `withdraw` flow.
+#### `depositWithPermit` (deposit only)
+
+Native USDC implements EIP-2612, so a deposit needs no prior `approve` transaction. `depositWithPermit(pool, assets, minShares, receiver, deadline, referralCode, v, r, s)`:
+
+1. Calls `USDC.permit(msg.sender, router, assets, deadline, v, r, s)`. The permit **owner is always `msg.sender`**, so invariant 1 still holds: a third party holding someone else's signature can't spend their USDC through the router.
+2. Runs the same code path as `deposit`.
+
+Design points:
+
+- **Exact amount.** The signature authorizes exactly `assets`, which the deposit consumes in full, so no standing allowance is left behind.
+- **Shared deadline.** `deadline` is both the permit deadline and the deposit deadline.
+- **Front-run tolerant.** If someone submits the same signature to USDC first, the router's `permit` call reverts on the used nonce, but the allowance is already in place. The router ignores permit failures (`try`/`catch`), and the pull fails with `ERC20InsufficientAllowance` only if there really is no allowance. This also lets a caller that already approved pass a dummy signature.
+- **Gas.** Measured on a Base fork against Aave: about 436k gas for one `depositWithPermit` transaction vs 461k for `approve` + `deposit`, saving the second transaction's 21k base cost and its L1 data fee.
+- **ECDSA signatures only.** This is the standard `(v, r, s)` EIP-2612 permit, which suits EOAs and MPC wallets. Smart-contract wallets (Safe, ERC-1271) should batch `approve` + `deposit` instead (§4.6, row 1). USDC's non-standard `bytes signature` overload isn't used.
+- **No permit on withdrawals.** Not every share token supports permit, so withdrawals keep the same `approve` + `withdraw` flow for every pool.
 
 ### 4.7 Referral codes
 
@@ -362,6 +376,20 @@ interface IRestakeRouter {
         address receiver,
         uint256 deadline,
         bytes32 referralCode
+    ) external returns (uint256 shares, uint256 fee);
+
+    /// @notice `deposit` without a prior `approve`: first applies msg.sender's EIP-2612 USDC permit for exactly
+    ///         `assets`, valid until `deadline` (§4.6). A failed permit (e.g. front-run) is ignored.
+    function depositWithPermit(
+        address pool,
+        uint256 assets,
+        uint256 minShares,
+        address receiver,
+        uint256 deadline,
+        bytes32 referralCode,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external returns (uint256 shares, uint256 fee);
 
     /// @notice Pull `shares` (or aTokens) from msg.sender, redeem them, and send the underlying to `receiver`.

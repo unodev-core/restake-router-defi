@@ -133,6 +133,22 @@ interface IRestakeRouter {
         bytes32 referralCode
     ) external returns (uint256 shares, uint256 fee);
 
+    /// @notice `deposit` in one transaction, without a prior `approve`: first applies the caller's EIP-2612
+    ///         USDC permit for exactly `assets` to this router, valid until `deadline`.
+    /// @dev The permit's owner is always msg.sender. A permit that fails (e.g. front-run with the same
+    ///      signature) is ignored, and the deposit proceeds if the allowance is in place.
+    function depositWithPermit(
+        address pool,
+        uint256 assets,
+        uint256 minShares,
+        address receiver,
+        uint256 deadline,
+        bytes32 referralCode,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 shares, uint256 fee);
+
     /// @notice Pull `shares` (or aTokens) from msg.sender, redeem them, and send the USDC to `receiver`.
     /// @param shares    Pass type(uint256).max to withdraw msg.sender's full balance.
     /// @param minAssets Must be > 0, so a queued (async) redeem reverts instead of completing silently.

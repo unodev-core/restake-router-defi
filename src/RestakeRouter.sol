@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -108,12 +109,25 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 deadline,
         bytes32 referralCode
     ) external nonReentrant returns (uint256 shares, uint256 fee) {
-        PoolType pType = _checkAction(pool, receiver, deadline);
-        if (assets == 0) revert ZeroAmount();
-        _checkDepositsOpen(pool);
+        return _deposit(pool, assets, minShares, receiver, deadline, referralCode);
+    }
 
-        _pullExact(IERC20(USDC), assets);
-        (shares, fee) = _depositHeld(pType, pool, assets, minShares, receiver, referralCode);
+    /// @inheritdoc IRestakeRouter
+    function depositWithPermit(
+        address pool,
+        uint256 assets,
+        uint256 minShares,
+        address receiver,
+        uint256 deadline,
+        bytes32 referralCode,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant returns (uint256 shares, uint256 fee) {
+        // A front-run permit (same signature submitted first) reverts on the used nonce but has already set
+        // the allowance, so failures are ignored; `_pullExact` reverts if the allowance isn't there.
+        try IERC20Permit(USDC).permit(msg.sender, address(this), assets, deadline, v, r, s) {} catch {}
+        return _deposit(pool, assets, minShares, receiver, deadline, referralCode);
     }
 
     /// @inheritdoc IRestakeRouter
@@ -301,6 +315,23 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     function _registeredType(address pool) private view returns (PoolType pType) {
         pType = poolType[pool];
         if (pType == PoolType.NONE) revert PoolNotRegistered(pool);
+    }
+
+    /// @dev Shared by `deposit` and `depositWithPermit`: pulls `assets` USDC from msg.sender and deposits it.
+    function _deposit(
+        address pool,
+        uint256 assets,
+        uint256 minShares,
+        address receiver,
+        uint256 deadline,
+        bytes32 referralCode
+    ) private returns (uint256 shares, uint256 fee) {
+        PoolType pType = _checkAction(pool, receiver, deadline);
+        if (assets == 0) revert ZeroAmount();
+        _checkDepositsOpen(pool);
+
+        _pullExact(IERC20(USDC), assets);
+        (shares, fee) = _depositHeld(pType, pool, assets, minShares, receiver, referralCode);
     }
 
     function _checkDepositsOpen(address pool) private view {
