@@ -26,11 +26,14 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     uint256 public constant MAX_TIERS = FeeLib.MAX_TIERS;
 
     // CCTP V2 MessageV2 / BurnMessageV2 byte offsets, absolute within the message (body starts at 148).
+    // Slither does not count calldata slice bounds as uses, so it flags these as unused.
+    // slither-disable-start unused-state
     uint256 private constant MSG_SOURCE_DOMAIN = 4;
     uint256 private constant MSG_NONCE = 12;
     uint256 private constant MSG_RECIPIENT = 76;
     uint256 private constant MSG_MINT_RECIPIENT = 148 + 36;
     uint256 private constant MSG_MESSAGE_SENDER = 148 + 100;
+    // slither-disable-end unused-state
     uint256 private constant MSG_HOOK_DATA = 148 + 228;
     uint256 private constant HOOK_LENGTH = 5 * 32;
 
@@ -76,11 +79,15 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
         // slither-disable-next-line missing-zero-check zero deploys without CCTP support
         CCTP_TOKEN_MESSENGER = cctpTokenMessenger_;
-        address transmitter = cctpTokenMessenger_ == address(0)
-            ? address(0)
-            : ITokenMessengerV2(cctpTokenMessenger_).localMessageTransmitter();
+        address transmitter;
+        uint32 localDomain;
+        if (cctpTokenMessenger_ != address(0)) {
+            transmitter = ITokenMessengerV2(cctpTokenMessenger_).localMessageTransmitter();
+            if (transmitter == address(0)) revert ZeroAddress();
+            localDomain = IMessageTransmitterV2(transmitter).localDomain();
+        }
         CCTP_MESSAGE_TRANSMITTER = transmitter;
-        CCTP_LOCAL_DOMAIN = transmitter == address(0) ? 0 : IMessageTransmitterV2(transmitter).localDomain();
+        CCTP_LOCAL_DOMAIN = localDomain;
 
         FeeLib.validate(feeTiers_);
         for (uint256 i; i < feeTiers_.length; ++i) {
