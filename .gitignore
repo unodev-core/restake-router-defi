@@ -1,0 +1,13 @@
+# Foundry
+out/
+cache/
+broadcast/*/31337/
+broadcast/**/dry-run/
+
+# Env
+.env
+
+# Subgraph
+subgraph/node_modules/
+subgraph/generated/
+subgraph/build/

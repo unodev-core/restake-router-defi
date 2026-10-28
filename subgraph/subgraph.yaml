@@ -1,0 +1,49 @@
+specVersion: 1.2.0
+description: Restake DeFi Router (docs/architecture-v1.0.md §7)
+schema:
+  file: ./schema.graphql
+dataSources:
+  # One data source per router release (§10). Fill in address and startBlock (the deploy block, so the
+  # constructor's PoolAdded / FeeTiersSet events are indexed) once v1.0 is deployed.
+  - kind: ethereum/contract
+    name: RestakeRouterV1_0
+    network: base
+    source:
+      abi: RestakeRouter
+      address: "0x0000000000000000000000000000000000000000"
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/router.ts
+      entities:
+        - Router
+        - Pool
+        - RouterPool
+        - FeeTier
+        - User
+        - Position
+        - DepositEvent
+        - WithdrawEvent
+        - SweepEvent
+        - DailyPoolStats
+        - ProtocolStats
+      abis:
+        - name: RestakeRouter
+          file: ./abis/RestakeRouter.json
+      eventHandlers:
+        - event: Deposit(indexed address,indexed address,indexed address,address,uint256,uint256,uint256,uint256,uint8,uint16,bytes32)
+          handler: handleDeposit
+        - event: Withdraw(indexed address,indexed address,indexed address,address,uint256,uint256)
+          handler: handleWithdraw
+        - event: PoolAdded(indexed address,uint8)
+          handler: handlePoolAdded
+        - event: FeeTiersSet((uint256,uint16)[])
+          handler: handleFeeTiersSet
+        - event: PoolDepositsDisabled(indexed address)
+          handler: handlePoolDepositsDisabled
+        - event: AllDepositsDisabled()
+          handler: handleAllDepositsDisabled
+        - event: Swept(indexed address,uint256)
+          handler: handleSwept

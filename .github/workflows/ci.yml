@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge fmt --check
+      - run: forge build --sizes
+      - name: Unit, fuzz and invariant tests
+        run: forge test --no-match-path 'test/fork/*' -vvv
+      - name: Base fork tests (skipped when the BASE_RPC_URL secret is unset)
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: forge test --match-path 'test/fork/*' -vvv
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: crytic/slither-action@v0.4.1
+        with:
+          target: src/
+          slither-args: --filter-paths "lib|test|script"
+      - name: Aderyn
+        run: |
+          npm install -g @cyfrin/aderyn
+          aderyn --src src . -o aderyn-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aderyn-report
+          path: aderyn-report.md
+
+  subgraph:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: subgraph
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx graph codegen
+      - run: npx graph build

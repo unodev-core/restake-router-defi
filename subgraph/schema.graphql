@@ -1,0 +1,132 @@
+# Restake DeFi Router subgraph (docs/architecture-v1.0.md §7).
+# Positions are router-flow only: shares moved outside the router (direct vault deposits, transfers,
+# YO Gateway redeems) aren't seen. Index the share tokens' Transfer events if exact balances are needed.
+
+"One deployed router release. Each release is its own data source sharing these entities."
+type Router @entity(immutable: false) {
+  id: Bytes! # router address
+  allDepositsDisabled: Boolean!
+  feeTiers: [FeeTier!]! @derivedFrom(field: "router")
+  pools: [RouterPool!]! @derivedFrom(field: "router")
+  depositCount: BigInt!
+  withdrawCount: BigInt!
+  totalGrossDeposited: BigInt!
+  totalFees: BigInt!
+  totalWithdrawn: BigInt!
+  deployedAtBlock: BigInt!
+  deployedAtTimestamp: BigInt!
+}
+
+"Fee tier snapshot, written once from the constructor's FeeTiersSet event."
+type FeeTier @entity(immutable: true) {
+  id: String! # router-index
+  router: Router!
+  index: Int!
+  minAmount: BigInt!
+  feeBps: Int!
+}
+
+"A yield venue (ERC-4626 vault or Aave aToken), shared across router releases."
+type Pool @entity(immutable: false) {
+  id: Bytes! # pool address (= share token / aToken)
+  poolType: String! # ERC4626 | AAVE_V3
+  listings: [RouterPool!]! @derivedFrom(field: "pool")
+  depositCount: BigInt!
+  withdrawCount: BigInt!
+  totalNetDeposited: BigInt!
+  totalWithdrawn: BigInt!
+  totalFees: BigInt!
+}
+
+"A pool as listed in one router, with that router's kill switch."
+type RouterPool @entity(immutable: false) {
+  id: String! # router-pool
+  router: Router!
+  pool: Pool!
+  depositsDisabled: Boolean!
+  addedAtBlock: BigInt!
+}
+
+type User @entity(immutable: false) {
+  id: Bytes!
+  positions: [Position!]! @derivedFrom(field: "user")
+  deposits: [DepositEvent!]! @derivedFrom(field: "receiver")
+  withdrawals: [WithdrawEvent!]! @derivedFrom(field: "sender")
+}
+
+"User x pool, aggregated across router releases (router-flow only)."
+type Position @entity(immutable: false) {
+  id: String! # user-pool
+  user: User!
+  pool: Pool!
+  shares: BigInt!
+  netDeposited: BigInt!
+  feesPaid: BigInt!
+  withdrawn: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+type DepositEvent @entity(immutable: true) {
+  id: Bytes! # txHash-logIndex
+  router: Router!
+  sender: Bytes!
+  receiver: User!
+  pool: Pool!
+  asset: Bytes!
+  grossAssets: BigInt!
+  fee: BigInt!
+  netAssets: BigInt!
+  shares: BigInt!
+  tierIndex: Int!
+  feeBps: Int!
+  referralCode: Bytes!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type WithdrawEvent @entity(immutable: true) {
+  id: Bytes! # txHash-logIndex
+  router: Router!
+  sender: User!
+  receiver: Bytes!
+  pool: Pool!
+  asset: Bytes!
+  shares: BigInt!
+  assets: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type SweepEvent @entity(immutable: true) {
+  id: Bytes!
+  router: Router!
+  token: Bytes!
+  amount: BigInt!
+  timestamp: BigInt!
+}
+
+type DailyPoolStats @entity(immutable: false) {
+  id: String! # pool-dayIndex
+  pool: Pool!
+  dayStartTimestamp: BigInt!
+  depositCount: Int!
+  withdrawCount: Int!
+  grossDeposited: BigInt!
+  netDeposited: BigInt!
+  fees: BigInt!
+  withdrawn: BigInt!
+}
+
+"Singleton (id = 'protocol'), across every router release."
+type ProtocolStats @entity(immutable: false) {
+  id: String!
+  routerCount: Int!
+  userCount: Int!
+  depositCount: BigInt!
+  withdrawCount: BigInt!
+  totalGrossDeposited: BigInt!
+  totalFees: BigInt!
+  totalWithdrawn: BigInt!
+}

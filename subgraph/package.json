@@ -1,0 +1,16 @@
+{
+  "name": "restake-router-subgraph",
+  "version": "1.0.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "scripts": {
+    "abi": "cd .. && forge inspect RestakeRouter abi --json > subgraph/abis/RestakeRouter.json",
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "deploy": "graph deploy restake-router-base"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "0.98.1",
+    "@graphprotocol/graph-ts": "0.38.2"
+  }
+}
