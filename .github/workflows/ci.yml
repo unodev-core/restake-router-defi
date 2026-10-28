@@ -32,10 +32,9 @@ jobs:
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+      # Target the repo root: the action only installs forge inside its container when the target has
+      # foundry.toml. Paths and exclusions come from slither.config.json.
       - uses: crytic/slither-action@v0.4.1
-        with:
-          target: src/
-          slither-args: --filter-paths "lib|test|script"
       - name: Aderyn
         run: |
           npm install -g @cyfrin/aderyn

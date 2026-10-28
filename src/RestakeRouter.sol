@@ -54,6 +54,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         FEE_RECIPIENT = feeRecipient_;
         GUARDIAN = guardian_;
         USDC = usdc_;
+        // slither-disable-next-line missing-zero-check zero when the chain has no AAVE_V3 pools (checked per pool)
         AAVE_POOL = aavePool_;
 
         FeeLib.validate(feeTiers_);
@@ -108,13 +109,17 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         PoolType pType = _checkAction(pool, receiver, deadline);
         if (minAssets == 0) revert ZeroAmount();
         if (shares == type(uint256).max) shares = IERC20(pool).balanceOf(msg.sender);
+        // slither-disable-next-line incorrect-equality zero-amount guard
         if (shares == 0) revert ZeroAmount();
 
+        // Balance delta across the redeem is intended (§9); entry points are nonReentrant.
+        // slither-disable-start reentrancy-balance
         IERC20 usdc = IERC20(USDC);
         uint256 receiverBefore = usdc.balanceOf(receiver);
         shares = pType == PoolType.ERC4626 ? _redeem4626(pool, shares, receiver) : _redeemAave(pool, shares, receiver);
         assets = usdc.balanceOf(receiver) - receiverBefore;
         if (assets < minAssets) revert SlippageExceeded(assets, minAssets);
+        // slither-disable-end reentrancy-balance
 
         emit Withdraw(msg.sender, receiver, pool, USDC, shares, assets);
     }
@@ -123,6 +128,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     /// @dev nonReentrant so it can never touch funds in flight during a deposit or withdraw.
     function sweep(address token) external nonReentrant {
         uint256 amount = IERC20(token).balanceOf(address(this));
+        // slither-disable-next-line incorrect-equality zero-amount guard
         if (amount == 0) revert ZeroAmount();
         IERC20(token).safeTransfer(FEE_RECIPIENT, amount);
         emit Swept(token, amount);
@@ -175,7 +181,9 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
     // ───────────── Internal ─────────────
 
+    /// @dev Constructor-only, over the deploy-time pool list.
     function _validatePool(PoolInit memory p, address usdc_, address aavePool_) private view {
+        // slither-disable-start calls-loop
         if (p.poolType == PoolType.ERC4626) {
             if (IERC4626(p.pool).asset() != usdc_) revert AssetMismatch(p.pool);
         } else if (p.poolType == PoolType.AAVE_V3) {
@@ -185,10 +193,12 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         } else {
             revert InvalidPoolType();
         }
+        // slither-disable-end calls-loop
     }
 
     /// @dev Checks shared by deposit and withdraw. Returns the pool's type.
     function _checkAction(address pool, address receiver, uint256 deadline) private view returns (PoolType) {
+        // slither-disable-next-line timestamp user-supplied deadline
         if (block.timestamp > deadline) revert DeadlineExpired();
         if (receiver == address(0) || receiver == address(this) || receiver == pool) revert InvalidReceiver(receiver);
         return _registeredType(pool);
@@ -237,6 +247,8 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         private
         returns (uint256 shares)
     {
+        // Balance deltas across the pool call are intended (§9); entry points are nonReentrant.
+        // slither-disable-start reentrancy-balance,unused-return
         IERC20 usdc = IERC20(USDC);
         uint256 usdcBefore = usdc.balanceOf(address(this));
         uint256 sharesBefore = IERC20(pool).balanceOf(receiver);
@@ -254,15 +266,18 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         shares = IERC20(pool).balanceOf(receiver) - sharesBefore;
         uint256 spent = usdcBefore - usdc.balanceOf(address(this));
         if (spent != netAssets) revert UnexpectedTransferAmount(netAssets, spent);
+        // slither-disable-end reentrancy-balance,unused-return
     }
 
     /// @dev Pulls `shares` from msg.sender and redeems them as owner. Returns the shares spent.
     function _redeem4626(address vault, uint256 shares, address receiver) private returns (uint256) {
+        // slither-disable-start reentrancy-balance,unused-return
         uint256 before = _pullExact(IERC20(vault), shares);
         // forge-lint: disable-next-line(unused-return) assets are measured as a balance delta by the caller
         IERC4626(vault).redeem(shares, receiver, address(this));
         uint256 remaining = IERC20(vault).balanceOf(address(this)) - before;
         if (remaining != 0) revert UnexpectedTransferAmount(shares, shares - remaining);
+        // slither-disable-end reentrancy-balance,unused-return
         return shares;
     }
 
@@ -273,7 +288,9 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         IERC20(aToken).safeTransferFrom(msg.sender, address(this), amount);
         received = IERC20(aToken).balanceOf(address(this)) - before;
         // With no prior (donated) balance, withdraw the router's whole position so no scaled dust stays behind.
+        // slither-disable-start incorrect-equality,unused-return
         // forge-lint: disable-next-line(unused-return) assets are measured as a balance delta by the caller
         IAaveV3Pool(AAVE_POOL).withdraw(USDC, before == 0 ? type(uint256).max : received, receiver);
+        // slither-disable-end incorrect-equality,unused-return
     }
 }
