@@ -171,6 +171,24 @@ interface IRestakeRouter {
         bytes32 partnerUserRef
     ) external returns (uint256 assets);
 
+    /// @notice `withdraw` in one transaction, without a prior `approve`: first applies the caller's EIP-2612
+    ///         permit on the pool's share token (or aToken) for `shares` to this router, valid until `deadline`.
+    /// @dev The permit's owner is always msg.sender. For a full exit (`shares` = type(uint256).max) the permit
+    ///      value is type(uint256).max too; the router only ever pulls from msg.sender, so that allowance can't
+    ///      be spent by anyone else. A permit that fails (front-run, or a share token without EIP-2612) is
+    ///      ignored, and the withdrawal proceeds if the allowance is in place.
+    function withdrawWithPermit(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        uint256 deadline,
+        bytes32 partnerUserRef,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 assets);
+
     /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
 

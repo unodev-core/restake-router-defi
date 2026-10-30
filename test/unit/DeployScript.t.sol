@@ -55,7 +55,7 @@ contract DeployScriptTest is Test {
         Deploy.Config memory test = script.loadConfig(testJson, 8453);
 
         assertEq(test.release, "v1.0-test");
-        assertEq(test.saltLabel, "restake.router.v1.0-test");
+        assertEq(test.saltLabel, "restake.router.v1.0-test.2");
         test.deployer = prod.deployer = makeAddr("deployer");
         assertNotEq(script.salt(test), script.salt(prod), "test salt must differ from production");
 

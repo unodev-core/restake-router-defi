@@ -170,6 +170,26 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         emit Withdraw(msg.sender, receiver, pool, USDC, shares, assets, partnerUserRef);
     }
 
+    /// @inheritdoc IRestakeRouter
+    function withdrawWithPermit(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        uint256 deadline,
+        bytes32 partnerUserRef,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant returns (uint256 assets) {
+        PoolType pType = _checkAction(pool, receiver, deadline);
+        // Same as `depositWithPermit`: failures (front-run, or a share token without permit) are ignored and
+        // the pull reverts if the allowance isn't there.
+        try IERC20Permit(pool).permit(msg.sender, address(this), shares, deadline, v, r, s) {} catch {}
+        (shares, assets) = _withdrawTo(pType, pool, shares, minAssets, receiver);
+        emit Withdraw(msg.sender, receiver, pool, USDC, shares, assets, partnerUserRef);
+    }
+
     // ───────────── CCTP ─────────────
 
     /// @inheritdoc IRestakeRouter

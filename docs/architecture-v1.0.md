@@ -169,9 +169,9 @@ Passing `shares == type(uint256).max` means "withdraw my whole balance". The rou
 | Wallet type | Flow |
 |---|---|
 | Smart wallets (Coinbase Smart Wallet, Safe, 7702-delegated EOAs) | `wallet_sendCalls` (EIP-5792) with `[approve, deposit]` in **one user confirmation**. |
-| Plain EOAs and MPC wallets (e.g. partner omnibus wallets) | **Deposit:** one transaction with `depositWithPermit`, using an off-chain EIP-2612 USDC signature. **Withdraw:** two transactions, `approve` then `withdraw`. |
+| Plain EOAs and MPC wallets (e.g. partner omnibus wallets) | **Deposit:** one transaction with `depositWithPermit`, using an off-chain EIP-2612 USDC signature. **Withdraw:** one transaction with `withdrawWithPermit`, using an EIP-2612 signature on the share token, for every pool except yoUSD and avUSDC, which have no permit and still need `approve` then `withdraw`. |
 
-#### `depositWithPermit` (deposit only)
+#### `depositWithPermit`
 
 Native USDC implements EIP-2612, so a deposit needs no prior `approve` transaction. `depositWithPermit(pool, assets, minShares, receiver, deadline, referralCode, partnerUserRef, v, r, s)`:
 
@@ -185,7 +185,13 @@ Design points:
 - **Front-run tolerant.** If someone submits the same signature to USDC first, the router's `permit` call reverts on the used nonce, but the allowance is already in place. The router ignores permit failures (`try`/`catch`), and the pull fails with `ERC20InsufficientAllowance` only if there really is no allowance. This also lets a caller that already approved pass a dummy signature.
 - **Gas.** Measured on a Base fork against Aave: about 436k gas for one `depositWithPermit` transaction vs 461k for `approve` + `deposit`, saving the second transaction's 21k base cost and its L1 data fee.
 - **ECDSA signatures only.** This is the standard `(v, r, s)` EIP-2612 permit, which suits EOAs and MPC wallets. Smart-contract wallets (Safe, ERC-1271) should batch `approve` + `deposit` instead (§4.6, row 1). USDC's non-standard `bytes signature` overload isn't used.
-- **No permit on withdrawals.** Not every share token supports permit, so withdrawals keep the same `approve` + `withdraw` flow for every pool.
+
+#### `withdrawWithPermit`
+
+`withdrawWithPermit(pool, shares, minAssets, receiver, deadline, partnerUserRef, v, r, s)` calls `pool.permit(msg.sender, router, shares, deadline, v, r, s)` on the share token (or aToken), then runs the same code path as `withdraw`. The design points above carry over (owner is always `msg.sender`, shared deadline, failed permits ignored), with these differences:
+
+- **Full exit.** With `shares = type(uint256).max` the permit value is `type(uint256).max` too, so a rebasing aToken balance that grows between signing and execution is still covered. The leftover allowance is harmless: the router only ever pulls from `msg.sender`, so only the owner can use it.
+- **Per-pool support.** Each share token has its own EIP-712 domain and nonces. Checked on Base mainnet (Oct 2026): every v1 pool supports EIP-2612 except **yoUSD** and **avUSDC**, whose current implementations have no `permit`. For those, the permit call fails and is ignored, so callers approve first (a dummy signature is fine). Both are upgradeable proxies, so support can change.
 
 ### 4.7 Referral codes and partner user references
 
@@ -196,7 +202,7 @@ Design points:
 - **Encoding.** The frontend and partners agree on one format, e.g. a short ASCII tag right-padded to 32 bytes, or `keccak256(partnerId)`.
 - **Not on withdrawals.** Withdrawals carry no fee, so there's nothing to attribute.
 
-Deposits and withdrawals (including `depositWithPermit`, the CCTP hook and `withdrawAndBridge`) also take a `bytes32 partnerUserRef`, emitted unchanged in `Deposit` and `Withdraw`.
+Deposits and withdrawals (including `depositWithPermit`, `withdrawWithPermit`, the CCTP hook and `withdrawAndBridge`) also take a `bytes32 partnerUserRef`, emitted unchanged in `Deposit` and `Withdraw`.
 
 - **Why.** An omnibus partner deposits and withdraws from one wallet on behalf of many end users, so `sender` and `receiver` can't tell those users apart. The partner sets `partnerUserRef` to identify the end user and matches its own deposits and withdrawals to that user from the events.
 - **Separate from `referralCode`.** The referral code says *which partner* brought the deposit; `partnerUserRef` says *which of the partner's users* it belongs to. Keeping both lets a partner be attributed and reconcile per user at the same time.
@@ -420,6 +426,20 @@ interface IRestakeRouter {
         bytes32 partnerUserRef
     ) external returns (uint256 assets);
 
+    /// @notice `withdraw` without a prior `approve`: first applies msg.sender's EIP-2612 permit on the share
+    ///         token for `shares` (max = full balance), valid until `deadline` (§4.6). A failed permit is ignored.
+    function withdrawWithPermit(
+        address pool,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        uint256 deadline,
+        bytes32 partnerUserRef,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 assets);
+
     /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
 
@@ -622,7 +642,7 @@ A CREATE2 address is `keccak(factory, salt, keccak(initCode))`, and `initCode` i
 
 ### Constructor config file
 
-There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited. The exception is `constructor-config.v1-test.json`: the same constructor arguments under its own salt label (`restake.router.v1.0-test`), for a rehearsal deploy that can't claim the production address. A unit test keeps it in sync with v1.
+There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited. The exception is `constructor-config.v1-test.json`: the same constructor arguments under its own salt label (`restake.router.v1.0-test.2`; bump the suffix for each new rehearsal, since CREATE3 addresses depend only on the salt), for a rehearsal deploy that can't claim the production address. A unit test keeps it in sync with v1.
 
 | Path | Meaning |
 |---|---|

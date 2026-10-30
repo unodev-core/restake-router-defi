@@ -3,14 +3,14 @@
   "spec": "docs/architecture-v1.0.md",
   "deployment": {
     "createX": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
-    "saltLabel": "restake.router.v1.0-test",
+    "saltLabel": "restake.router.v1.0-test.2",
     "crossChainRedeployProtection": false
   },
   "chains": {
     "base": {
       "chainId": 8453,
       "deployer": "0xeEF7Ea108c30Ee392099b3b5782A795F0BBE2715",
-      "expectedRouter": "0xeE08BBC5BB1A5C8777Cf14FF6350712b000F16fF",
+      "expectedRouter": "0xB8A7fBFecdC46C98A0A82Ca78650f844618a3580",
       "constructor": {
         "feeRecipient": "0x3fe95C1140B82dA198883e2Cfb56766776E3BcD6",
         "guardian": "0x3fe95C1140B82dA198883e2Cfb56766776E3BcD6",

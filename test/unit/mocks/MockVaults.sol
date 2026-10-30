@@ -4,15 +4,25 @@ pragma solidity 0.8.28;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
 import {IRestakeRouter} from "../../../src/interfaces/IRestakeRouter.sol";
 
-/// @notice Plain OZ ERC-4626. `decimalsOffset` 12 gives 18-decimal shares over USDC, like Morpho / Sky sUSDC.
-contract MockERC4626 is ERC4626 {
+/// @notice Plain OZ ERC-4626 with EIP-2612 permit on its shares. `decimalsOffset` 12 gives 18-decimal shares
+///         over USDC, like Morpho / Sky sUSDC.
+contract MockERC4626 is ERC4626, ERC20Permit {
     uint8 private immutable _offset;
 
-    constructor(IERC20 asset_, uint8 decimalsOffset_) ERC20("Mock Vault", "mVLT") ERC4626(asset_) {
+    constructor(IERC20 asset_, uint8 decimalsOffset_)
+        ERC20("Mock Vault", "mVLT")
+        ERC4626(asset_)
+        ERC20Permit("Mock Vault")
+    {
         _offset = decimalsOffset_;
+    }
+
+    function decimals() public view override(ERC20, ERC4626) returns (uint8) {
+        return ERC4626.decimals();
     }
 
     function _decimalsOffset() internal view override returns (uint8) {
