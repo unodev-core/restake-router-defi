@@ -17,8 +17,8 @@ import {FeeLib} from "./libraries/FeeLib.sol";
 /// @notice Immutable, ownerless, non-custodial router that deposits USDC into a fixed set of ERC-4626 vaults
 ///         and Aave V3 (taking a tiered deposit fee), and withdraws from them (no fee). Optionally receives
 ///         deposits from, and bridges withdrawals to, other chains through Circle CCTP V2.
-/// @dev Pool list and fee tiers are written once in the constructor; no code path writes them again.
-///      The only mutable state is the guardian's one-way deposit kill switches.
+/// @dev Fee tiers are immutables and the pool list is written once in the constructor; no code path writes
+///      them again. The only mutable state is the guardian's one-way deposit kill switches.
 contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
@@ -45,12 +45,25 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     address public immutable CCTP_MESSAGE_TRANSMITTER;
     uint32 public immutable CCTP_LOCAL_DOMAIN;
 
-    mapping(address pool => PoolType) public poolType;
-    mapping(address pool => bool) public depositsDisabled;
+    // Fee tiers packed with `FeeLib.pack` (unused slots are zero), so a deposit reads no storage for its fee.
+    // One immutable per tier up to FeeLib.MAX_TIERS (5); `validate` rejects longer schedules.
+    uint256 private immutable FEE_TIER_COUNT;
+    uint256 private immutable FEE_TIER_0;
+    uint256 private immutable FEE_TIER_1;
+    uint256 private immutable FEE_TIER_2;
+    uint256 private immutable FEE_TIER_3;
+    uint256 private immutable FEE_TIER_4;
+
+    /// @dev One slot per pool, so a deposit's pool checks cost a single cold SLOAD.
+    struct PoolState {
+        PoolType poolType;
+        bool depositsDisabled;
+    }
+
+    mapping(address pool => PoolState) private _poolState;
     bool public allDepositsDisabled;
 
     address[] private _pools;
-    FeeTier[] private _feeTiers;
 
     modifier onlyGuardian() {
         if (msg.sender != GUARDIAN) revert NotGuardian();
@@ -90,16 +103,20 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         CCTP_LOCAL_DOMAIN = localDomain;
 
         FeeLib.validate(feeTiers_);
-        for (uint256 i; i < feeTiers_.length; ++i) {
-            _feeTiers.push(feeTiers_[i]);
-        }
+        uint256 nTiers = feeTiers_.length;
+        FEE_TIER_COUNT = nTiers;
+        FEE_TIER_0 = FeeLib.pack(feeTiers_[0]);
+        FEE_TIER_1 = nTiers > 1 ? FeeLib.pack(feeTiers_[1]) : 0;
+        FEE_TIER_2 = nTiers > 2 ? FeeLib.pack(feeTiers_[2]) : 0;
+        FEE_TIER_3 = nTiers > 3 ? FeeLib.pack(feeTiers_[3]) : 0;
+        FEE_TIER_4 = nTiers > 4 ? FeeLib.pack(feeTiers_[4]) : 0;
         emit FeeTiersSet(feeTiers_);
 
         for (uint256 i; i < pools_.length; ++i) {
             PoolInit memory p = pools_[i];
-            if (poolType[p.pool] != PoolType.NONE) revert DuplicatePool(p.pool);
+            if (_poolState[p.pool].poolType != PoolType.NONE) revert DuplicatePool(p.pool);
             _validatePool(p, usdc_, aavePool_);
-            poolType[p.pool] = p.poolType;
+            _poolState[p.pool].poolType = p.poolType;
             _pools.push(p.pool);
             emit PoolAdded(p.pool, p.poolType);
         }
@@ -261,8 +278,9 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
     /// @inheritdoc IRestakeRouter
     function disablePoolDeposits(address pool) external onlyGuardian {
-        if (poolType[pool] == PoolType.NONE) revert PoolNotRegistered(pool);
-        depositsDisabled[pool] = true;
+        PoolState storage state = _poolState[pool];
+        if (state.poolType == PoolType.NONE) revert PoolNotRegistered(pool);
+        state.depositsDisabled = true;
         emit PoolDepositsDisabled(pool);
     }
 
@@ -279,7 +297,15 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     }
 
     function getFeeTiers() external view returns (FeeTier[] memory) {
-        return _feeTiers;
+        return _feeTiers();
+    }
+
+    function poolType(address pool) external view returns (PoolType) {
+        return _poolState[pool].poolType;
+    }
+
+    function depositsDisabled(address pool) external view returns (bool) {
+        return _poolState[pool].depositsDisabled;
     }
 
     /// @inheritdoc IRestakeRouter
@@ -290,7 +316,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     {
         PoolType pType = _registeredType(pool);
         uint16 feeBps;
-        (tierIndex, feeBps) = FeeLib.tierFor(_feeTiers, assets);
+        (tierIndex, feeBps) = FeeLib.tierFor(_feeTiers(), assets);
         fee = FeeLib.feeFor(assets, feeBps);
         netAssets = assets - fee;
         expectedShares = pType == PoolType.ERC4626 ? IERC4626(pool).previewDeposit(netAssets) : netAssets;
@@ -328,7 +354,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     }
 
     function _registeredType(address pool) private view returns (PoolType pType) {
-        pType = poolType[pool];
+        pType = _poolState[pool].poolType;
         if (pType == PoolType.NONE) revert PoolNotRegistered(pool);
     }
 
@@ -352,7 +378,17 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
     function _checkDepositsOpen(address pool) private view {
         if (allDepositsDisabled) revert AllDepositsAreDisabled();
-        if (depositsDisabled[pool]) revert DepositsDisabled(pool);
+        // Warm: `_registeredType` already read this slot.
+        if (_poolState[pool].depositsDisabled) revert DepositsDisabled(pool);
+    }
+
+    /// @dev Unpacks the fee tier immutables into the array form `FeeLib.tierFor` takes.
+    function _feeTiers() private view returns (FeeTier[] memory tiers) {
+        uint256[5] memory packed = [FEE_TIER_0, FEE_TIER_1, FEE_TIER_2, FEE_TIER_3, FEE_TIER_4];
+        tiers = new FeeTier[](FEE_TIER_COUNT);
+        for (uint256 i; i < tiers.length; ++i) {
+            tiers[i] = FeeLib.unpack(packed[i]);
+        }
     }
 
     /// @dev Takes the fee from, and deposits the rest of, `assets` USDC the router already holds.
@@ -503,7 +539,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
 
     /// @dev Sizes the fee from the tier schedule (gross amount of this single deposit) and pays FEE_RECIPIENT.
     function _chargeFee(uint256 assets) private returns (uint256 fee, uint8 tierIndex, uint16 feeBps) {
-        (tierIndex, feeBps) = FeeLib.tierFor(_feeTiers, assets);
+        (tierIndex, feeBps) = FeeLib.tierFor(_feeTiers(), assets);
         fee = FeeLib.feeFor(assets, feeBps);
         if (fee != 0) IERC20(USDC).safeTransfer(FEE_RECIPIENT, fee);
     }

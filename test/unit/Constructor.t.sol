@@ -37,6 +37,22 @@ contract ConstructorTest is BaseTest {
         }
     }
 
+    /// @dev Every schedule length must round-trip through the packed fee tier immutables.
+    function test_feeTiers_roundTripEveryLength() public {
+        for (uint256 n = 1; n <= router.MAX_TIERS(); ++n) {
+            IRestakeRouter.FeeTier[] memory tiers = new IRestakeRouter.FeeTier[](n);
+            for (uint256 i; i < n; ++i) {
+                tiers[i] = IRestakeRouter.FeeTier(i * 1_000e6, uint16(100 - i * 10));
+            }
+            RestakeRouter r = _deployRouter(tiers, defaultPools());
+            assertEq(keccak256(abi.encode(r.getFeeTiers())), keccak256(abi.encode(tiers)));
+
+            (uint256 fee, uint8 tierIndex,,) = r.previewDeposit(address(vault), (n - 1) * 1_000e6 + 1e6);
+            assertEq(tierIndex, n - 1);
+            assertEq(fee, ((n - 1) * 1_000e6 + 1e6) * (100 - (n - 1) * 10) / 10_000);
+        }
+    }
+
     function test_emitsConfigEvents() public {
         IRestakeRouter.PoolInit[] memory pools = defaultPools();
         vm.expectEmit(true, true, true, true);

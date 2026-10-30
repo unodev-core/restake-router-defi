@@ -279,6 +279,17 @@ cd subgraph && npm ci && npm run abi && npx graph codegen && npx graph build
    The script refuses to deploy if any placeholder is still zero, if any pool is unverified, or if the CreateX-predicted address doesn't match `expectedRouter`. Broadcasting fails unless the wallet is the configured `deployer`.
 4. Set the router address and deploy block in [subgraph/subgraph.yaml](subgraph/subgraph.yaml).
 
+### Test deployment
+
+[constructor-config.v1-test.json](script/config/constructor-config.v1-test.json) has the same constructor arguments as v1 but its own salt label (`restake.router.v1.0-test`), so a rehearsal deploy gets a different address and never claims the production one. Fill in its placeholders the same way, then:
+
+```sh
+CONFIG_PATH=script/config/constructor-config.v1-test.json \
+  forge script script/Deploy.s.sol --rpc-url base --account <deployer-keystore> --broadcast --verify
+```
+
+`test/unit/DeployScript.t.sol` checks that both files have the same protocol config (USDC, Aave, CCTP, fee tiers, pools) under different salts. The operator addresses (`deployer`, `feeRecipient`, `guardian`) may differ. Keep the protocol config in sync when you edit v1.
+
 ## License
 
 [Business Source License 1.1](LICENSE). Converts to GPL-2.0-or-later on 2030-10-27.

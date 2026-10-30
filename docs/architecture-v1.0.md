@@ -266,13 +266,17 @@ All config is passed to the constructor, validated there, and written once. Ther
 
 ### 5.1 Pool list
 
-Storage: `mapping(address pool => PoolType)` plus an `address[]` for enumeration. Every pool's underlying is `USDC`, so nothing else needs storing per pool.
+Storage: one `PoolState` slot per pool plus an `address[]` for enumeration. Packing the type and the kill switch into one slot means a deposit's pool checks cost a single cold SLOAD. Every pool's underlying is `USDC`, so nothing else needs storing per pool. `poolType(pool)` and `depositsDisabled(pool)` are explicit view getters over it.
 
 ```solidity
 enum PoolType { NONE, ERC4626, AAVE_V3 }
 
-mapping(address pool => PoolType) public poolType;      // NONE = not in this router
-mapping(address pool => bool) public depositsDisabled;  // guardian kill switch, one-way
+struct PoolState {
+    PoolType poolType;      // NONE = not in this router
+    bool depositsDisabled;  // guardian kill switch, one-way
+}
+
+mapping(address pool => PoolState) private _poolState;
 ```
 
 - **Key:** the token the user ends up holding.
@@ -300,7 +304,7 @@ USDC on Base: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (native USDC, not bri
 
 ### 5.2 Fee tiers
 
-One schedule for the whole router: `FeeTier[] feeTiers`, with thresholds in raw USDC units (6 decimals). Because there's only one asset, raw amounts equal USD amounts and no oracle is needed.
+One schedule for the whole router, with thresholds in raw USDC units (6 decimals). It is stored in immutables, not storage: each tier is packed into one word (`minAmount << 16 | feeBps`, `FeeLib.pack`) across five immutables plus a count, so sizing the fee reads no storage. `getFeeTiers()` unpacks them back into `FeeTier[]`. Because there's only one asset, raw amounts equal USD amounts and no oracle is needed.
 
 ```solidity
 struct FeeTier {
@@ -312,7 +316,7 @@ struct FeeTier {
 **Constructor validation:**
 - `1 <= tiers.length <= MAX_TIERS` (`MAX_TIERS = 5` as a constant; v1.0 uses 3).
 - `tiers[0].minAmount == 0`, so every amount maps to a tier.
-- `minAmount` is strictly ascending.
+- `minAmount` is strictly ascending, and at most `type(uint240).max` so it fits the packed word.
 - `feeBps <= MAX_FEE_BPS` for every tier.
 
 **Tier selection:** the highest tier with `minAmount <= grossAmount`. The amount used is the **gross amount of a single deposit**. It is not cumulative per user, which keeps the logic stateless.
@@ -618,7 +622,7 @@ A CREATE2 address is `keccak(factory, salt, keccak(initCode))`, and `initCode` i
 
 ### Constructor config file
 
-There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited.
+There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited. The exception is `constructor-config.v1-test.json`: the same constructor arguments under its own salt label (`restake.router.v1.0-test`), for a rehearsal deploy that can't claim the production address. A unit test keeps it in sync with v1.
 
 | Path | Meaning |
 |---|---|

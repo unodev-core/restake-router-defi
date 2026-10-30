@@ -19,6 +19,10 @@ contract FeeLibHarness {
     function feeFor(uint256 amount, uint16 feeBps) external pure returns (uint256) {
         return FeeLib.feeFor(amount, feeBps);
     }
+
+    function packRoundTrip(IRestakeRouter.FeeTier memory tier) external pure returns (IRestakeRouter.FeeTier memory) {
+        return FeeLib.unpack(FeeLib.pack(tier));
+    }
 }
 
 contract FeeLibTest is Test {
@@ -163,6 +167,28 @@ contract FeeLibTest is Test {
         tiers[1].feeBps = FeeLib.MAX_FEE_BPS + 1;
         vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.FeeTooHigh.selector, FeeLib.MAX_FEE_BPS + 1));
         lib.validate(tiers);
+    }
+
+    function test_validate_acceptsMaxMinAmount() public view {
+        IRestakeRouter.FeeTier[] memory tiers = _v1();
+        tiers[2].minAmount = FeeLib.MAX_MIN_AMOUNT;
+        lib.validate(tiers);
+    }
+
+    function test_validate_revertsAboveMaxMinAmount() public {
+        IRestakeRouter.FeeTier[] memory tiers = _v1();
+        tiers[2].minAmount = FeeLib.MAX_MIN_AMOUNT + 1;
+        vm.expectRevert(IRestakeRouter.InvalidFeeTiers.selector);
+        lib.validate(tiers);
+    }
+
+    // ───────────── Packing ─────────────
+
+    function testFuzz_packRoundTrip(uint256 minAmount, uint16 feeBps) public view {
+        minAmount = bound(minAmount, 0, FeeLib.MAX_MIN_AMOUNT);
+        IRestakeRouter.FeeTier memory tier = lib.packRoundTrip(IRestakeRouter.FeeTier(minAmount, feeBps));
+        assertEq(tier.minAmount, minAmount);
+        assertEq(tier.feeBps, feeBps);
     }
 
     function test_validate_acceptsCapAndZero() public view {

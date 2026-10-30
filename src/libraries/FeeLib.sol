@@ -9,16 +9,30 @@ library FeeLib {
     uint16 internal constant BPS_DENOMINATOR = 10_000;
     uint16 internal constant MAX_FEE_BPS = 100; // 1%
     uint256 internal constant MAX_TIERS = 5;
+    /// @dev `pack` keeps minAmount in the high 240 bits of the word.
+    uint256 internal constant MAX_MIN_AMOUNT = type(uint240).max;
 
-    /// @dev Reverts unless: 1 <= length <= MAX_TIERS, tiers[0].minAmount == 0, minAmount strictly ascending,
-    ///      and every feeBps <= MAX_FEE_BPS.
+    /// @dev Reverts unless: 1 <= length <= MAX_TIERS, tiers[0].minAmount == 0, minAmount strictly ascending
+    ///      and <= MAX_MIN_AMOUNT, and every feeBps <= MAX_FEE_BPS.
     function validate(IRestakeRouter.FeeTier[] memory tiers) internal pure {
         uint256 n = tiers.length;
         if (n == 0 || n > MAX_TIERS || tiers[0].minAmount != 0) revert IRestakeRouter.InvalidFeeTiers();
+        if (tiers[n - 1].minAmount > MAX_MIN_AMOUNT) revert IRestakeRouter.InvalidFeeTiers();
         for (uint256 i; i < n; ++i) {
             if (tiers[i].feeBps > MAX_FEE_BPS) revert IRestakeRouter.FeeTooHigh(tiers[i].feeBps);
             if (i != 0 && tiers[i].minAmount <= tiers[i - 1].minAmount) revert IRestakeRouter.InvalidFeeTiers();
         }
+    }
+
+    /// @notice Packs a tier into one word (minAmount << 16 | feeBps), so the router can keep it in an immutable.
+    /// @dev Assumes `tier` passed `validate`, so minAmount fits in 240 bits.
+    function pack(IRestakeRouter.FeeTier memory tier) internal pure returns (uint256) {
+        return tier.minAmount << 16 | tier.feeBps;
+    }
+
+    function unpack(uint256 packed) internal pure returns (IRestakeRouter.FeeTier memory) {
+        // forge-lint: disable-next-line(unsafe-typecast) low 16 bits hold feeBps
+        return IRestakeRouter.FeeTier({minAmount: packed >> 16, feeBps: uint16(packed)});
     }
 
     /// @notice The highest tier with `minAmount <= amount`.

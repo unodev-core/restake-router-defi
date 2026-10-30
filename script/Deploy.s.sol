@@ -11,6 +11,8 @@ import {ICreateX} from "../src/interfaces/ICreateX.sol";
 /// @dev Usage:
 ///      forge script script/Deploy.s.sol --rpc-url base --account <deployer> --broadcast --verify
 ///      CONFIG_PATH overrides the default config file (script/config/constructor-config.v1.json).
+///      Test deploy (own salt, so it never claims the production address):
+///      CONFIG_PATH=script/config/constructor-config.v1-test.json forge script script/Deploy.s.sol ...
 contract Deploy is Script {
     struct Config {
         string release;

@@ -45,6 +45,26 @@ contract DeployScriptTest is Test {
         assertEq(aave, 1);
     }
 
+    /// @dev The test config must rehearse production's protocol config (USDC, Aave, CCTP, fee tiers, pools) under
+    ///      its own salt: a test deploy must never claim the production router address, which is immutable once
+    ///      taken. The operator addresses (deployer, fee recipient, guardian) may differ.
+    function test_testConfig_mirrorsProductionWithOwnSalt() public {
+        string memory testJson =
+            vm.readFile(string.concat(vm.projectRoot(), "/script/config/constructor-config.v1-test.json"));
+        Deploy.Config memory prod = script.loadConfig(json, 8453);
+        Deploy.Config memory test = script.loadConfig(testJson, 8453);
+
+        assertEq(test.release, "v1.0-test");
+        assertEq(test.saltLabel, "restake.router.v1.0-test");
+        test.deployer = prod.deployer = makeAddr("deployer");
+        assertNotEq(script.salt(test), script.salt(prod), "test salt must differ from production");
+
+        assertEq(test.createX, prod.createX);
+        assertEq(test.crossChainRedeployProtection, prod.crossChainRedeployProtection);
+        (test.feeRecipient, test.guardian) = (prod.feeRecipient, prod.guardian);
+        assertEq(script.initCode(test), script.initCode(prod), "constructor args must match production");
+    }
+
     function test_revert_unknownChain() public {
         vm.expectRevert(bytes("Deploy: no config for chainId 1"));
         script.loadConfig(json, 1);
