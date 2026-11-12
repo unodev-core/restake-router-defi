@@ -11,6 +11,7 @@ import {MockAavePool, MockAToken} from "./mocks/MockAave.sol";
 contract ConstructorTest is BaseTest {
     function test_config() public view {
         assertEq(router.FEE_RECIPIENT(), feeRecipient);
+        assertEq(router.SWEEP_RECIPIENT(), sweepRecipient);
         assertEq(router.GUARDIAN(), guardian);
         assertEq(router.USDC(), address(usdc));
         assertEq(router.AAVE_POOL(), address(aavePool));
@@ -67,8 +68,9 @@ contract ConstructorTest is BaseTest {
     function test_noAavePoolNeededWithoutAavePools() public {
         IRestakeRouter.PoolInit[] memory pools = new IRestakeRouter.PoolInit[](1);
         pools[0] = IRestakeRouter.PoolInit(address(vault), IRestakeRouter.PoolType.ERC4626);
-        RestakeRouter r =
-            new RestakeRouter(feeRecipient, guardian, address(usdc), address(0), address(0), defaultTiers(), pools);
+        RestakeRouter r = new RestakeRouter(
+            feeRecipient, sweepRecipient, guardian, address(usdc), address(0), address(0), defaultTiers(), pools
+        );
         assertEq(r.AAVE_POOL(), address(0));
     }
 
@@ -77,27 +79,71 @@ contract ConstructorTest is BaseTest {
     function test_revert_zeroFeeRecipient() public {
         vm.expectRevert(IRestakeRouter.ZeroAddress.selector);
         new RestakeRouter(
-            address(0), guardian, address(usdc), address(aavePool), address(0), defaultTiers(), defaultPools()
+            address(0),
+            sweepRecipient,
+            guardian,
+            address(usdc),
+            address(aavePool),
+            address(0),
+            defaultTiers(),
+            defaultPools()
+        );
+    }
+
+    function test_revert_zeroSweepRecipient() public {
+        vm.expectRevert(IRestakeRouter.ZeroAddress.selector);
+        new RestakeRouter(
+            feeRecipient,
+            address(0),
+            guardian,
+            address(usdc),
+            address(aavePool),
+            address(0),
+            defaultTiers(),
+            defaultPools()
         );
     }
 
     function test_revert_zeroGuardian() public {
         vm.expectRevert(IRestakeRouter.ZeroAddress.selector);
         new RestakeRouter(
-            feeRecipient, address(0), address(usdc), address(aavePool), address(0), defaultTiers(), defaultPools()
+            feeRecipient,
+            sweepRecipient,
+            address(0),
+            address(usdc),
+            address(aavePool),
+            address(0),
+            defaultTiers(),
+            defaultPools()
         );
     }
 
     function test_revert_zeroUsdc() public {
         vm.expectRevert(IRestakeRouter.ZeroAddress.selector);
         new RestakeRouter(
-            feeRecipient, guardian, address(0), address(aavePool), address(0), defaultTiers(), defaultPools()
+            feeRecipient,
+            sweepRecipient,
+            guardian,
+            address(0),
+            address(aavePool),
+            address(0),
+            defaultTiers(),
+            defaultPools()
         );
     }
 
     function test_revert_aavePoolMissingForAavePool() public {
         vm.expectRevert(IRestakeRouter.ZeroAddress.selector);
-        new RestakeRouter(feeRecipient, guardian, address(usdc), address(0), address(0), defaultTiers(), defaultPools());
+        new RestakeRouter(
+            feeRecipient,
+            sweepRecipient,
+            guardian,
+            address(usdc),
+            address(0),
+            address(0),
+            defaultTiers(),
+            defaultPools()
+        );
     }
 
     // ───────────── Fee tiers (full matrix in FeeLib.t.sol) ─────────────

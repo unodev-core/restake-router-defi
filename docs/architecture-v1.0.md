@@ -246,7 +246,7 @@ Any failure reverts the whole call, including `receiveMessage`. The CCTP nonce s
 
 Refunds pay out on Base rather than bouncing back over CCTP, because a burn can require a nonzero `minFee` even at standard finality, and the refund has nothing to pay it from.
 
-**`destinationCaller` must be the router.** If it is `bytes32(0)`, anyone can relay the message directly to the MessageTransmitter. The USDC is then minted to the router with no deposit, and `sweep` sends it to `FEE_RECIPIENT`. The router can't enforce this, because it is set on the source chain.
+**`destinationCaller` must be the router.** If it is `bytes32(0)`, anyone can relay the message directly to the MessageTransmitter. The USDC is then minted to the router with no deposit, and `sweep` sends it to `SWEEP_RECIPIENT`. The router can't enforce this, because it is set on the source chain.
 
 `hook.deadline` must cover the attestation delay: seconds for fast transfers, and roughly 15–20 minutes for standard transfers from L2s that wait for Ethereum finality. `minShares` should be sized from the expected minted amount (`amount − maxFee`) minus the router fee.
 
@@ -440,11 +440,12 @@ interface IRestakeRouter {
         bytes32 s
     ) external returns (uint256 assets);
 
-    /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
+    /// @notice Sends any token balance held by the router to SWEEP_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
 
     // ───────────── Views ─────────────
     function FEE_RECIPIENT() external view returns (address);
+    function SWEEP_RECIPIENT() external view returns (address);
     function GUARDIAN() external view returns (address);
     function AAVE_POOL() external view returns (address);
     function USDC() external view returns (address);
@@ -475,6 +476,7 @@ interface IRestakeRouter {
 ```solidity
 constructor(
     address feeRecipient_,
+    address sweepRecipient_,         // destination of `sweep`, separate from fee revenue
     address guardian_,
     address usdc_,                   // native USDC on this chain
     address aavePool_,               // address(0) if no AAVE_V3 pools on this chain
@@ -484,14 +486,14 @@ constructor(
 )
 ```
 
-- `FEE_RECIPIENT`, `GUARDIAN`, `USDC`, `AAVE_POOL` and the three `CCTP_*` values are `immutable`.
-- Reverts if `feeRecipient_`, `guardian_` or `usdc_` is zero, or if any fee tier or pool check from §5 fails.
+- `FEE_RECIPIENT`, `SWEEP_RECIPIENT`, `GUARDIAN`, `USDC`, `AAVE_POOL` and the three `CCTP_*` values are `immutable`.
+- Reverts if `feeRecipient_`, `sweepRecipient_`, `guardian_` or `usdc_` is zero, or if any fee tier or pool check from §5 fails.
 - Emits `FeeTiersSet` once and `PoolAdded` for every pool, so the subgraph reads the full config from the deploy block.
 - The constructor must not read `msg.sender`: under CREATE3 it is the CreateX proxy, not the deployer.
 
 ### `sweep`
 
-The router should never hold a balance at the end of a transaction. `sweep` only recovers tokens sent to it by mistake. Since every user action is atomic, it can't touch funds in flight. It needs no admin, because the destination is always `FEE_RECIPIENT`.
+The router should never hold a balance at the end of a transaction. `sweep` only recovers tokens sent to it by mistake. Since every user action is atomic, it can't touch funds in flight. It needs no admin, because the destination is always `SWEEP_RECIPIENT`, set at deploy from the config and kept separate from `FEE_RECIPIENT` so recovered funds (which may belong to users) never mix with fee revenue.
 
 ---
 
@@ -653,7 +655,7 @@ There is one file per release: `script/config/constructor-config.v<major>.json`.
 | `chains.<name>.chainId` | The script picks the entry whose `chainId == block.chainid` (it iterates over `vm.parseJsonKeys(".chains")`). |
 | `chains.<name>.deployer` | Salt bytes 0–19. The script reverts unless it equals the broadcasting address. |
 | `chains.<name>.expectedRouter` | Must equal `computeCreate3Address(guardedSalt)`. Identical across chains for one release. |
-| `chains.<name>.constructor.feeRecipient` / `guardian` / `usdc` / `aavePool` | Constructor arguments 1–4. |
+| `chains.<name>.constructor.feeRecipient` / `sweepRecipient` / `guardian` / `usdc` / `aavePool` | Constructor arguments 1–5. |
 | `chains.<name>.constructor.feeTiers[]` | `{ minAmount, feeBps }` in raw USDC units → `FeeTier[]`. `name` is just a label. |
 | `chains.<name>.constructor.pools[]` | `{ pool, poolType }` → `PoolInit[]`. `poolType` is the enum name (`"ERC4626"` / `"AAVE_V3"`). `protocol` and `name` are labels; `slug` matches the pool's slug in the backend database seed. |
 | `pools[].verified` | Set to `true` only after the onboarding checklist (§8) is done. The script reverts on any `false`. |

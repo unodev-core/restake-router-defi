@@ -28,6 +28,7 @@ abstract contract BaseTest is Test {
     RestakeRouter internal router;
 
     address internal feeRecipient = makeAddr("feeRecipient");
+    address internal sweepRecipient = makeAddr("sweepRecipient");
     address internal guardian = makeAddr("guardian");
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
@@ -69,7 +70,14 @@ abstract contract BaseTest is Test {
         returns (RestakeRouter)
     {
         return new RestakeRouter(
-            feeRecipient, guardian, address(usdc), address(aavePool), address(tokenMessenger), tiers, pools
+            feeRecipient,
+            sweepRecipient,
+            guardian,
+            address(usdc),
+            address(aavePool),
+            address(tokenMessenger),
+            tiers,
+            pools
         );
     }
 

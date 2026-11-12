@@ -27,6 +27,7 @@ abstract contract BaseForkTest is Test {
 
     address internal deployer = makeAddr("deployer");
     address internal feeRecipient = makeAddr("feeRecipient");
+    address internal sweepRecipient = makeAddr("sweepRecipient");
     address internal guardian = makeAddr("guardian");
     address internal alice = makeAddr("alice");
 
@@ -45,6 +46,7 @@ abstract contract BaseForkTest is Test {
         Deploy.Config memory c = script.loadConfig(json, block.chainid);
         c.deployer = deployer;
         c.feeRecipient = feeRecipient;
+        c.sweepRecipient = sweepRecipient;
         c.guardian = guardian;
         c.expectedRouter = ICreateX(c.createX).computeCreate3Address(script.guardedSalt(c));
         for (uint256 i; i < c.poolVerified.length; ++i) {
@@ -66,6 +68,7 @@ abstract contract BaseForkTest is Test {
         cfg.deployer = c.deployer;
         cfg.expectedRouter = c.expectedRouter;
         cfg.feeRecipient = c.feeRecipient;
+        cfg.sweepRecipient = c.sweepRecipient;
         cfg.guardian = c.guardian;
         cfg.usdc = c.usdc;
         cfg.aavePool = c.aavePool;

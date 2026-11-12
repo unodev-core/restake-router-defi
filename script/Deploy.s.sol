@@ -22,6 +22,7 @@ contract Deploy is Script {
         address deployer;
         address expectedRouter;
         address feeRecipient;
+        address sweepRecipient;
         address guardian;
         address usdc;
         address aavePool;
@@ -58,6 +59,7 @@ contract Deploy is Script {
 
         string memory ctor = string.concat(chain, ".constructor");
         cfg.feeRecipient = vm.parseJsonAddress(json, string.concat(ctor, ".feeRecipient"));
+        cfg.sweepRecipient = vm.parseJsonAddress(json, string.concat(ctor, ".sweepRecipient"));
         cfg.guardian = vm.parseJsonAddress(json, string.concat(ctor, ".guardian"));
         cfg.usdc = vm.parseJsonAddress(json, string.concat(ctor, ".usdc"));
         cfg.aavePool = vm.parseJsonAddress(json, string.concat(ctor, ".aavePool"));
@@ -91,6 +93,7 @@ contract Deploy is Script {
         require(cfg.deployer != address(0), "Deploy: deployer not set");
         require(cfg.expectedRouter != address(0), "Deploy: expectedRouter not set");
         require(cfg.feeRecipient != address(0), "Deploy: feeRecipient not set");
+        require(cfg.sweepRecipient != address(0), "Deploy: sweepRecipient not set");
         require(cfg.guardian != address(0), "Deploy: guardian not set");
         for (uint256 i; i < cfg.poolVerified.length; ++i) {
             require(cfg.poolVerified[i], string.concat("Deploy: pool not verified: ", vm.toString(cfg.pools[i].pool)));
@@ -129,7 +132,14 @@ contract Deploy is Script {
         return abi.encodePacked(
             type(RestakeRouter).creationCode,
             abi.encode(
-                cfg.feeRecipient, cfg.guardian, cfg.usdc, cfg.aavePool, cfg.cctpTokenMessenger, cfg.feeTiers, cfg.pools
+                cfg.feeRecipient,
+                cfg.sweepRecipient,
+                cfg.guardian,
+                cfg.usdc,
+                cfg.aavePool,
+                cfg.cctpTokenMessenger,
+                cfg.feeTiers,
+                cfg.pools
             )
         );
     }

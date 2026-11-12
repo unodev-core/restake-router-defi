@@ -16,6 +16,7 @@ contract DeployForkTest is BaseForkTest {
 
     function test_configMatchesJson() public view {
         assertEq(router.FEE_RECIPIENT(), feeRecipient);
+        assertEq(router.SWEEP_RECIPIENT(), sweepRecipient);
         assertEq(router.GUARDIAN(), guardian);
         assertEq(router.USDC(), cfg.usdc);
         assertEq(router.AAVE_POOL(), cfg.aavePool);

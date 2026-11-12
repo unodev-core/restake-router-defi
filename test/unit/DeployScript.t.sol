@@ -47,7 +47,7 @@ contract DeployScriptTest is Test {
 
     /// @dev The test config must rehearse production's protocol config (USDC, Aave, CCTP, fee tiers, pools) under
     ///      its own salt: a test deploy must never claim the production router address, which is immutable once
-    ///      taken. The operator addresses (deployer, fee recipient, guardian) may differ.
+    ///      taken. The operator addresses (deployer, fee recipient, sweep recipient, guardian) may differ.
     function test_testConfig_mirrorsProductionWithOwnSalt() public {
         string memory testJson =
             vm.readFile(string.concat(vm.projectRoot(), "/script/config/constructor-config.v1-test.json"));
@@ -61,7 +61,8 @@ contract DeployScriptTest is Test {
 
         assertEq(test.createX, prod.createX);
         assertEq(test.crossChainRedeployProtection, prod.crossChainRedeployProtection);
-        (test.feeRecipient, test.guardian) = (prod.feeRecipient, prod.guardian);
+        (test.feeRecipient, test.sweepRecipient, test.guardian) =
+        (prod.feeRecipient, prod.sweepRecipient, prod.guardian);
         assertEq(script.initCode(test), script.initCode(prod), "constructor args must match production");
     }
 
@@ -79,6 +80,10 @@ contract DeployScriptTest is Test {
         cfg.deployer = address(1);
         cfg.expectedRouter = address(2);
         cfg.feeRecipient = address(3);
+        vm.expectRevert(bytes("Deploy: sweepRecipient not set"));
+        script.checkReady(cfg);
+
+        cfg.sweepRecipient = address(5);
         cfg.guardian = address(4);
         vm.expectRevert(bytes(string.concat("Deploy: pool not verified: ", vm.toString(cfg.pools[0].pool))));
         script.checkReady(cfg);

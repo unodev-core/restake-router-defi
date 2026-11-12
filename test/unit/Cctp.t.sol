@@ -21,7 +21,14 @@ contract CctpTest is BaseTest {
 
     function test_revert_disabledWithoutMessenger() public {
         RestakeRouter r = new RestakeRouter(
-            feeRecipient, guardian, address(usdc), address(aavePool), address(0), defaultTiers(), defaultPools()
+            feeRecipient,
+            sweepRecipient,
+            guardian,
+            address(usdc),
+            address(aavePool),
+            address(0),
+            defaultTiers(),
+            defaultPools()
         );
         assertEq(r.CCTP_MESSAGE_TRANSMITTER(), address(0));
         assertEq(r.CCTP_LOCAL_DOMAIN(), 0);

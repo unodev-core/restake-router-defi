@@ -114,7 +114,7 @@ sequenceDiagram
     Router-->>User: emit Withdraw(...)
 ```
 
-When the router held no aTokens before the call, it withdraws `type(uint256).max`. This burns its whole position, so no scaled-balance dust is left behind. If someone has donated aTokens to the router, it withdraws only the received amount, and `sweep` can recover the donation.
+When the router held no aTokens before the call, it withdraws `type(uint256).max`. This burns its whole position, so no scaled-balance dust is left behind. If someone has donated aTokens to the router, it withdraws only the received amount, and `sweep` can recover the donation to `SWEEP_RECIPIENT`.
 
 ### Async redeems (YO)
 
@@ -154,7 +154,7 @@ sequenceDiagram
     Note over P: relayer calls receiveMessage on Arbitrum → USDC minted to omnibus
 ```
 
-`hookData` is `abi.encode(pool, minShares, receiver, deadline, referralCode, partnerUserRef)`. `destinationCaller` **must** be the router: otherwise anyone can relay the burn without depositing, and the USDC is stranded in the router, where `sweep` sends it to the fee recipient. If a CCTP deposit can't go through, `receiveAndRefund` pays the USDC out on Base to `hook.receiver`, with no fee. The receiver can call it at any time; anyone can call it after the deadline. Full design: [architecture §4.8](docs/architecture-v1.0.md).
+`hookData` is `abi.encode(pool, minShares, receiver, deadline, referralCode, partnerUserRef)`. `destinationCaller` **must** be the router: otherwise anyone can relay the burn without depositing, and the USDC is stranded in the router, where `sweep` sends it to `SWEEP_RECIPIENT`. If a CCTP deposit can't go through, `receiveAndRefund` pays the USDC out on Base to `hook.receiver`, with no fee. The receiver can call it at any time; anyone can call it after the deadline. Full design: [architecture §4.8](docs/architecture-v1.0.md).
 
 ### Fee tiers
 
@@ -270,7 +270,7 @@ cd subgraph && npm ci && npm run abi && npx graph codegen && npx graph build
 
 ## Deploy
 
-1. In the chain's entry of [constructor-config.v1.json](script/config/constructor-config.v1.json), fill in `deployer`, `feeRecipient`, `guardian` and `expectedRouter`. Set `verified: true` on each pool once it has passed the onboarding checklist (architecture §8).
+1. In the chain's entry of [constructor-config.v1.json](script/config/constructor-config.v1.json), fill in `deployer`, `feeRecipient`, `sweepRecipient`, `guardian` and `expectedRouter`. Set `verified: true` on each pool once it has passed the onboarding checklist (architecture §8).
 2. Run the fork tests against that config.
 3. Deploy with the deployer's key:
 
@@ -290,7 +290,7 @@ CONFIG_PATH=script/config/constructor-config.v1-test.json \
   forge script script/Deploy.s.sol --rpc-url base --account <deployer-keystore> --broadcast --verify
 ```
 
-`test/unit/DeployScript.t.sol` checks that both files have the same protocol config (USDC, Aave, CCTP, fee tiers, pools) under different salts. The operator addresses (`deployer`, `feeRecipient`, `guardian`) may differ. Keep the protocol config in sync when you edit v1.
+`test/unit/DeployScript.t.sol` checks that both files have the same protocol config (USDC, Aave, CCTP, fee tiers, pools) under different salts. The operator addresses (`deployer`, `feeRecipient`, `sweepRecipient`, `guardian`) may differ. Keep the protocol config in sync when you edit v1.
 
 ## License
 

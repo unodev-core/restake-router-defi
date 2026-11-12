@@ -189,7 +189,7 @@ interface IRestakeRouter {
         bytes32 s
     ) external returns (uint256 assets);
 
-    /// @notice Sends any token balance held by the router to FEE_RECIPIENT. Callable by anyone.
+    /// @notice Sends any token balance held by the router to SWEEP_RECIPIENT. Callable by anyone.
     function sweep(address token) external;
 
     // ───────────── CCTP (cross-chain USDC) ─────────────
@@ -200,7 +200,7 @@ interface IRestakeRouter {
     /// @dev Any failure reverts the whole call, so the CCTP message stays unused and can be relayed again
     ///      or refunded with `receiveAndRefund`. The source should set `destinationCaller` to this router:
     ///      otherwise anyone can relay the message straight to the MessageTransmitter, leaving the USDC
-    ///      in the router where `sweep` sends it to FEE_RECIPIENT.
+    ///      in the router where `sweep` sends it to SWEEP_RECIPIENT.
     function receiveAndDeposit(bytes calldata message, bytes calldata attestation)
         external
         returns (uint256 shares, uint256 fee);
@@ -227,6 +227,7 @@ interface IRestakeRouter {
     // ───────────── Views ─────────────
 
     function FEE_RECIPIENT() external view returns (address);
+    function SWEEP_RECIPIENT() external view returns (address);
     function GUARDIAN() external view returns (address);
     function AAVE_POOL() external view returns (address);
     function USDC() external view returns (address);

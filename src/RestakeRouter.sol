@@ -38,6 +38,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     uint256 private constant HOOK_LENGTH = 6 * 32;
 
     address public immutable FEE_RECIPIENT;
+    address public immutable SWEEP_RECIPIENT;
     address public immutable GUARDIAN;
     address public immutable USDC;
     address public immutable AAVE_POOL;
@@ -74,6 +75,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
     ///      `cctpTokenMessenger_` is Circle's TokenMessengerV2, or zero to deploy without CCTP support.
     constructor(
         address feeRecipient_,
+        address sweepRecipient_,
         address guardian_,
         address usdc_,
         address aavePool_,
@@ -81,10 +83,14 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         FeeTier[] memory feeTiers_,
         PoolInit[] memory pools_
     ) {
-        if (feeRecipient_ == address(0) || guardian_ == address(0) || usdc_ == address(0)) {
+        if (
+            feeRecipient_ == address(0) || sweepRecipient_ == address(0) || guardian_ == address(0)
+                || usdc_ == address(0)
+        ) {
             revert ZeroAddress();
         }
         FEE_RECIPIENT = feeRecipient_;
+        SWEEP_RECIPIENT = sweepRecipient_;
         GUARDIAN = guardian_;
         USDC = usdc_;
         // slither-disable-next-line missing-zero-check zero when the chain has no AAVE_V3 pools (checked per pool)
@@ -290,7 +296,7 @@ contract RestakeRouter is IRestakeRouter, ReentrancyGuardTransient {
         uint256 amount = IERC20(token).balanceOf(address(this));
         // slither-disable-next-line incorrect-equality zero-amount guard
         if (amount == 0) revert ZeroAmount();
-        IERC20(token).safeTransfer(FEE_RECIPIENT, amount);
+        IERC20(token).safeTransfer(SWEEP_RECIPIENT, amount);
         emit Swept(token, amount);
     }
 

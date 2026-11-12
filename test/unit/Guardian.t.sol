@@ -78,7 +78,8 @@ contract GuardianTest is BaseTest {
         vm.prank(bob); // anyone
         router.sweep(address(stray));
 
-        assertEq(stray.balanceOf(feeRecipient), 5e18);
+        assertEq(stray.balanceOf(sweepRecipient), 5e18);
+        assertEq(stray.balanceOf(feeRecipient), 0);
         assertEq(stray.balanceOf(address(router)), 0);
     }
 
@@ -87,7 +88,7 @@ contract GuardianTest is BaseTest {
         vm.prank(alice);
         vault.transfer(address(router), shares);
         router.sweep(address(vault));
-        assertEq(vault.balanceOf(feeRecipient), shares);
+        assertEq(vault.balanceOf(sweepRecipient), shares);
     }
 
     function test_revert_sweepNothing() public {
