@@ -25,23 +25,11 @@
       "skillPath": "plugins/building-secure-contracts/skills/guidelines-advisor/SKILL.md",
       "computedHash": "c5fb81ce2edf98ba17b4e16541ec5ed79069be6986bb099e34c729b34b23ead5"
     },
-    "migrate-defender-to-cre": {
-      "source": "OpenZeppelin/openzeppelin-skills",
-      "sourceType": "github",
-      "skillPath": "skills/migrate-defender-to-cre/SKILL.md",
-      "computedHash": "b0299b5fb55063e56a0a50279777646fac394b10c175e96d326f73e2649e67e0"
-    },
     "secure-workflow-guide": {
       "source": "trailofbits/skills",
       "sourceType": "github",
       "skillPath": "plugins/building-secure-contracts/skills/secure-workflow-guide/SKILL.md",
       "computedHash": "d3dcf9545cab5a3836196c6245ef4a47d433e9e4f629a04a78f5e1a7ede70b3e"
-    },
-    "setup-cairo-contracts": {
-      "source": "OpenZeppelin/openzeppelin-skills",
-      "sourceType": "github",
-      "skillPath": "skills/setup-cairo-contracts/SKILL.md",
-      "computedHash": "0a563050fa22541d76890c862bc02a403e9f8590419a722d145dcf3df5578489"
     },
     "setup-solidity-contracts": {
       "source": "OpenZeppelin/openzeppelin-skills",
@@ -54,18 +42,6 @@
       "sourceType": "github",
       "skillPath": "plugins/building-secure-contracts/skills/token-integration-analyzer/SKILL.md",
       "computedHash": "44fbccf158e28bae4cfb969847ad46d72e93fe58f82b53a3551646b1c755c8d6"
-    },
-    "upgrade-cairo-contracts": {
-      "source": "OpenZeppelin/openzeppelin-skills",
-      "sourceType": "github",
-      "skillPath": "skills/upgrade-cairo-contracts/SKILL.md",
-      "computedHash": "ca5c23e3c72ec9ba4ffb3919789ae7131f313320600cd8b8c6d2eb09d4e22077"
-    },
-    "upgrade-solidity-contracts": {
-      "source": "OpenZeppelin/openzeppelin-skills",
-      "sourceType": "github",
-      "skillPath": "skills/upgrade-solidity-contracts/SKILL.md",
-      "computedHash": "ef8776be9fd2ee6721f6b6b29992bf6029a6122797b3cec6fe3ce185b22be4ef"
     }
   }
 }
