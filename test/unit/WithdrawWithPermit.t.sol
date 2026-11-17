@@ -60,7 +60,7 @@ contract WithdrawWithPermitTest is BaseTest {
         _assertRouterClean();
     }
 
-    /// @dev The mock aToken has no `permit` (like yoUSD / avUSDC on Base): with an existing approval and a
+    /// @dev The mock aToken has no `permit` (like avUSDC on Base): with an existing approval and a
     ///      junk signature the withdrawal behaves exactly like plain `withdraw`.
     function test_withdrawWithPermit_tokenWithoutPermit_existingApproval() public {
         uint256 shares = _deposit(owner, address(aToken), 100_000e6);

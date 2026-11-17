@@ -51,7 +51,7 @@ contract WithdrawTest is BaseTest {
         _assertRouterClean();
     }
 
-    /// @dev YO without idle liquidity: redeem queues and returns 0. minAssets > 0 must revert the whole tx,
+    /// @dev Async vault without idle liquidity: redeem queues and returns 0. minAssets > 0 must revert the whole tx,
     ///      so the shares never sit in a queue owned by the router.
     function test_revert_asyncVault_queuedRedeem() public {
         uint256 shares = _deposit(alice, address(asyncVault), 1_000e6);

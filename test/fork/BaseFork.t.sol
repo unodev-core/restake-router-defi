@@ -3,16 +3,10 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 import {Deploy} from "../../script/Deploy.s.sol";
 import {RestakeRouter} from "../../src/RestakeRouter.sol";
-import {IRestakeRouter} from "../../src/interfaces/IRestakeRouter.sol";
 import {ICreateX} from "../../src/interfaces/ICreateX.sol";
-
-interface INonViewPreviewRedeem {
-    function previewRedeem(uint256 shares) external returns (uint256);
-}
 
 /// @dev Base mainnet fork. Deploys the router from the real v1 config through CreateX, with test addresses in
 ///      place of the zero-address placeholders. Skipped unless BASE_RPC_URL is set.
@@ -103,17 +97,14 @@ abstract contract BaseForkTest is Test {
         uint256 expected = _quoteWithdraw(pool, amount);
         vm.startPrank(user);
         IERC20(pool).approve(address(router), type(uint256).max);
-        // AUTO Autopools can return less than previewRedeem when unwinding (§8): 1% tolerance.
+        // 1% tolerance for interest and exit-fee drift between the quote and the redeem.
         assets = router.withdraw(pool, shares, _max(expected * 99 / 100, 1), user, block.timestamp, bytes32(0));
         vm.stopPrank();
     }
 
-    /// @dev AUTO's Autopool `previewRedeem` simulates the redeem with a state-changing self-call, so it reverts
-    ///      under STATICCALL (i.e. via the router's view `previewWithdraw`). Quote ERC-4626 pools with a plain
-    ///      CALL to the vault instead, which is what the frontend's eth_call does.
-    function _quoteWithdraw(address pool, uint256 shares) internal returns (uint256) {
-        if (router.poolType(pool) == IRestakeRouter.PoolType.AAVE_V3) return router.previewWithdraw(pool, shares);
-        return INonViewPreviewRedeem(pool).previewRedeem(shares);
+    /// @dev Every v1 pool quotes through the router's view `previewWithdraw`.
+    function _quoteWithdraw(address pool, uint256 shares) internal view returns (uint256) {
+        return router.previewWithdraw(pool, shares);
     }
 
     function _assertRouterClean() internal view {

@@ -1,6 +1,6 @@
 # Restake DeFi Router subgraph (docs/architecture-v1.0.md §7).
 # Positions are router-flow only: shares moved outside the router (direct vault deposits, transfers,
-# YO Gateway redeems) aren't seen. Index the share tokens' Transfer events if exact balances are needed.
+# direct protocol redeems) aren't seen. Index the share tokens' Transfer events if exact balances are needed.
 
 "One deployed router release. Each release is its own data source sharing these entities."
 type Router @entity(immutable: false) {

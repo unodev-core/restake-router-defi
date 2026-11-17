@@ -18,9 +18,9 @@ abstract contract BaseTest is Test {
     bytes32 internal constant USER_REF = keccak256("omnibus-user-7");
 
     MockERC20 internal usdc;
-    MockERC4626 internal vault; // 6-decimal shares (Fluid, YO, Veranta)
-    MockERC4626 internal vault18; // 18-decimal shares (Morpho, Sky sUSDC, AUTO)
-    MockAsyncRedeemVault internal asyncVault; // YO-style async redeem
+    MockERC4626 internal vault; // 6-decimal shares (Fluid, Veranta)
+    MockERC4626 internal vault18; // 18-decimal shares (Morpho, Sky sUSDC)
+    MockAsyncRedeemVault internal asyncVault; // async redeem that can queue and return 0
     MockAavePool internal aavePool;
     MockAToken internal aToken;
     MockMessageTransmitterV2 internal transmitter;

@@ -5,11 +5,9 @@ A single immutable contract on Base that deposits USDC into a fixed set of yield
 | Protocol | Venue | Integration |
 |---|---|---|
 | Sky | Spark USDC Vault `sUSDC` | ERC-4626 |
-| Morpho | 8 USDC vaults (6 Vault V2, 2 Vault V1) | ERC-4626 |
+| Morpho | 6 USDC Vault V2 vaults | ERC-4626 |
 | Fluid | `fUSDC` | ERC-4626 |
 | Aave V3 | `aBasUSDC` | `IPool.supply` / `withdraw` |
-| YO Protocol | `yoUSD` | ERC-4626 (async redeem fallback) |
-| AUTO Finance | `baseUSD` Autopool | ERC-4626 |
 | Veranta | `avUSDC` | ERC-4626 |
 
 The full design rationale is in [docs/architecture-v1.0.md](docs/architecture-v1.0.md).
@@ -24,9 +22,9 @@ The full design rationale is in [docs/architecture-v1.0.md](docs/architecture-v1
 - **Two integration shapes, handled inline.** A `PoolType` enum (`ERC4626`, `AAVE_V3`) selects the code path. There are no external adapters.
 - **Balance-delta accounting.** Shares, assets and pulled amounts are measured as balance changes, never taken from return values. This rejects fee-on-transfer tokens, catches vaults that misreport, and handles Aave's 1-wei rounding.
 - **One-transaction deposits with USDC permit.** `depositWithPermit` takes an EIP-2612 signature for exactly the deposit amount instead of a prior `approve`. This suits EOA and MPC omnibus wallets. The permit owner is always `msg.sender`, and a front-run permit doesn't break the deposit.
-- **One-transaction withdrawals with share-token permit.** `withdrawWithPermit` does the same for withdrawals, using an EIP-2612 signature on the pool's share token or aToken. Every v1 pool supports it except yoUSD and avUSDC, which still need an `approve` first.
+- **One-transaction withdrawals with share-token permit.** `withdrawWithPermit` does the same for withdrawals, using an EIP-2612 signature on the pool's share token or aToken. Every v1 pool supports it except avUSDC, which still needs an `approve` first.
 - **User protection on every call:** `minShares` / `minAssets` slippage bounds, a `deadline`, `ReentrancyGuardTransient`, and exact-amount approvals that are reset to 0 after each call.
-- **Async redeems never get stuck.** `minAssets` must be greater than 0. If a vault queues a redeem instead of paying out (YO without idle liquidity), the whole transaction reverts and the shares stay with the user.
+- **Async redeems never get stuck.** `minAssets` must be greater than 0. If a vault ever queues a redeem instead of paying out, the whole transaction reverts and the shares stay with the user. No v1 pool does this; the check guards future releases.
 - **"Withdraw all".** Passing `shares = type(uint256).max` withdraws the caller's full balance as read inside the transaction. This matters for rebasing aTokens, where an amount signed in the UI would leave dust.
 - **One-way guardian kill switches.** The guardian can disable deposits for one pool or for all pools. Nobody can re-enable them, and withdrawals can never be blocked.
 - **Permissionless and referral-aware.** Anyone can deposit or withdraw. A `bytes32 referralCode` is emitted with every deposit for off-chain attribution, and a `bytes32 partnerUserRef` with every deposit and withdrawal so omnibus partners can map them to their own users. Neither changes the fee.
@@ -44,7 +42,7 @@ The full design rationale is in [docs/architecture-v1.0.md](docs/architecture-v1
 flowchart LR
     U[User wallet] -- "approve + deposit / withdraw" --> R[RestakeRouter<br/>immutable, no owner]
     R -- fee --> F[FEE_RECIPIENT]
-    R -- "deposit / redeem" --> V[ERC-4626 vaults<br/>Sky, Morpho, Fluid, YO, AUTO, Veranta]
+    R -- "deposit / redeem" --> V[ERC-4626 vaults<br/>Sky, Morpho, Fluid, Veranta]
     R -- "supply / withdraw" --> A[Aave V3 Pool]
     V -- shares --> U
     A -- aTokens --> U
@@ -115,18 +113,6 @@ sequenceDiagram
 ```
 
 When the router held no aTokens before the call, it withdraws `type(uint256).max`. This burns its whole position, so no scaled-balance dust is left behind. If someone has donated aTokens to the router, it withdraws only the received amount, and `sweep` can recover the donation to `SWEEP_RECIPIENT`.
-
-### Async redeems (YO)
-
-```mermaid
-flowchart TD
-    A[router calls redeem] --> B{Vault has idle USDC<br/>for the whole redeem?}
-    B -- yes --> C[USDC paid to receiver<br/>assets ≥ minAssets] --> D[✅ Withdraw succeeds]
-    B -- no --> E[Vault queues the request<br/>and returns 0]
-    E --> F[receiver delta = 0, below minAssets]
-    F --> G[❌ Whole tx reverts:<br/>queue undone, shares stay with the user]
-    G --> H[Frontend falls back to the YO Gateway<br/>with the user as owner]
-```
 
 ### Cross-chain via CCTP (e.g. Arbitrum omnibus ⇄ Base)
 
@@ -226,11 +212,9 @@ These are checked by the invariant suite in [test/invariant/](test/invariant/):
 | Pool | Note |
 |---|---|
 | Morpho Vault V2 | `maxDeposit` and the other `max*` functions always return 0 by design. Don't use them to size or gate deposits. |
-| AUTO baseUSD | The Autopool's `previewRedeem` changes state internally, so it reverts through the router's read-only `previewWithdraw`. Quote it by `eth_call`ing the vault's `previewRedeem` directly, and size `minAssets` with a tolerance. |
 | Veranta avUSDC | Charges about a 1.48% exit fee (`previewRedeem` < `convertToAssets`). Show it to the user. |
-| YO yoUSD | If a withdrawal reverts with `SlippageExceeded(0, …)`, the vault lacks idle liquidity. Fall back to the YO Gateway. |
 | `depositWithPermit` | Sign the EIP-2612 permit with `spender = router`, `value = assets`, and the same `deadline` as the deposit. ECDSA only: smart-contract wallets should batch `approve` + `deposit`. |
-| `withdrawWithPermit` | Sign the EIP-2612 permit on the **share token** (its own domain and nonce) with `spender = router`, `value = shares` (`max` for a full exit), and the same `deadline` as the withdrawal. yoUSD and avUSDC have no permit: approve first and pass a dummy signature, or use `withdraw`. |
+| `withdrawWithPermit` | Sign the EIP-2612 permit on the **share token** (its own domain and nonce) with `spender = router`, `value = shares` (`max` for a full exit), and the same `deadline` as the withdrawal. avUSDC has no permit: approve first and pass a dummy signature, or use `withdraw`. |
 | CCTP deposits | Set `destinationCaller = mintRecipient = router`. Size `minShares` from `amount − maxFee − router fee`, and give `deadline` enough slack for attestation: seconds for fast transfers, ~15–20 min for standard ones. |
 | CCTP withdrawals | The share owner on Base calls `withdrawAndBridge`. The destination needs a relayer (or the recipient) to call `receiveMessage` there; `destinationCaller` is 0. |
 | Aave aBasUSDC | For a full exit, pass `shares = max` and approve a buffer (or `max`), because the balance grows every block. |
@@ -283,7 +267,7 @@ cd subgraph && npm ci && npm run abi && npx graph codegen && npx graph build
 
 ### Test deployment
 
-[constructor-config.v1-test.json](script/config/constructor-config.v1-test.json) has the same constructor arguments as v1 but its own salt label (`restake.router.v1.0-test.2`; bump the suffix for each new rehearsal, since CREATE3 addresses depend only on the salt), so a rehearsal deploy gets a different address and never claims the production one. Fill in its placeholders the same way, then:
+[constructor-config.v1-test.json](script/config/constructor-config.v1-test.json) has the same constructor arguments as v1 but its own salt label (`restake.router.v1.0-test.3`; bump the suffix for each new rehearsal, since CREATE3 addresses depend only on the salt), so a rehearsal deploy gets a different address and never claims the production one. Fill in its placeholders the same way, then:
 
 ```sh
 CONFIG_PATH=script/config/constructor-config.v1-test.json \

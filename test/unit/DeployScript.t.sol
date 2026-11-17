@@ -34,9 +34,9 @@ contract DeployScriptTest is Test {
         assertEq(cfg.feeTiers[2].minAmount, 100_000e6);
         assertEq(cfg.feeTiers[2].feeBps, 10);
 
-        assertEq(cfg.pools.length, 14);
+        assertEq(cfg.pools.length, 10);
         assertEq(cfg.pools[0].pool, 0x3128a0F7f0ea68E7B7c9B00AFa7E41045828e858); // Sky sUSDC
-        assertEq(cfg.pools[10].pool, 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB); // aBasUSDC
+        assertEq(cfg.pools[8].pool, 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB); // aBasUSDC
         uint256 aave;
         for (uint256 i; i < cfg.pools.length; ++i) {
             if (cfg.pools[i].poolType == IRestakeRouter.PoolType.AAVE_V3) ++aave;
@@ -55,7 +55,7 @@ contract DeployScriptTest is Test {
         Deploy.Config memory test = script.loadConfig(testJson, 8453);
 
         assertEq(test.release, "v1.0-test");
-        assertEq(test.saltLabel, "restake.router.v1.0-test.2");
+        assertEq(test.saltLabel, "restake.router.v1.0-test.3");
         test.deployer = prod.deployer = makeAddr("deployer");
         assertNotEq(script.salt(test), script.salt(prod), "test salt must differ from production");
 

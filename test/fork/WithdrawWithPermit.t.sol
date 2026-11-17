@@ -6,12 +6,11 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 
 import {BaseForkTest} from "./BaseFork.t.sol";
 
-/// @dev `withdrawWithPermit` against every pool's share token on a Base fork. yoUSD and avUSDC have no EIP-2612
-///      permit: for them the router ignores the failed permit and falls back to a regular approval.
+/// @dev `withdrawWithPermit` against every pool's share token on a Base fork. avUSDC has no EIP-2612 permit:
+///      for it the router ignores the failed permit and falls back to a regular approval.
 contract WithdrawWithPermitForkTest is BaseForkTest {
     bytes32 internal constant PERMIT_TYPEHASH =
         keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
-    address internal constant YO_USD = 0x0000000f2eB9f69274678c76222B35eEc7588a65;
     address internal constant AV_USDC = 0x944766f715b51967E56aFdE5f0Aa76cEaCc9E7f9;
 
     function test_withdrawWithPermit_allPools() public {
@@ -21,7 +20,7 @@ contract WithdrawWithPermitForkTest is BaseForkTest {
             _depositAs(owner, pool, 1_000e6);
             uint256 minAssets = _max(_quoteWithdraw(pool, IERC20(pool).balanceOf(owner)) * 99 / 100, 1);
 
-            bool hasPermit = pool != YO_USD && pool != AV_USDC;
+            bool hasPermit = pool != AV_USDC;
             uint8 v = 27;
             bytes32 r;
             bytes32 s;
@@ -46,10 +45,10 @@ contract WithdrawWithPermitForkTest is BaseForkTest {
     /// @dev Without a permit and without an approval, the pull reverts.
     function test_revert_withdrawWithPermit_noPermitToken_noApproval() public {
         (address owner,) = makeAddrAndKey("permitOwner");
-        _depositAs(owner, YO_USD, 1_000e6);
+        _depositAs(owner, AV_USDC, 1_000e6);
         vm.expectRevert();
         vm.prank(owner);
-        router.withdrawWithPermit(YO_USD, type(uint256).max, 1, owner, block.timestamp, 0, 27, bytes32(0), bytes32(0));
+        router.withdrawWithPermit(AV_USDC, type(uint256).max, 1, owner, block.timestamp, 0, 27, bytes32(0), bytes32(0));
     }
 
     function _sign(address token, uint256 key, address owner, uint256 value)

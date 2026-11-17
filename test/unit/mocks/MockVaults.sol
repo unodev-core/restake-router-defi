@@ -30,7 +30,7 @@ contract MockERC4626 is ERC4626, ERC20Permit {
     }
 }
 
-/// @notice Mimics YO: without enough idle liquidity, `redeem` moves the shares into the vault, records a pending
+/// @notice Async-redeem vault (none in v1, guarded against generically): without enough idle liquidity, `redeem` moves the shares into the vault, records a pending
 ///         request keyed by `receiver`, and returns 0.
 contract MockAsyncRedeemVault is MockERC4626 {
     bool public instant = true;

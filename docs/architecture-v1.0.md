@@ -18,11 +18,9 @@
    | Protocol | Integration | Pool type |
    |---|---|---|
    | Sky (sky.money) | Spark USDC Vault `sUSDC` (ERC-4626 over sUSDS) | `ERC4626` |
-   | Morpho | Vault (ERC-4626) | `ERC4626` |
+   | Morpho | Vault V2 (ERC-4626) | `ERC4626` |
    | Fluid | fToken (ERC-4626) | `ERC4626` |
    | Aave V3 | `IPool.supply / withdraw` (aTokens) | `AAVE_V3` |
-   | YO Protocol | yoVault (ERC-4626, async redeem fallback) | `ERC4626` |
-   | AUTO Finance | Autopool (ERC-4626) | `ERC4626` |
    | Veranta (formerly Avantis) | USDC Vault `avUSDC` (ERC-4626) | `ERC4626` |
 
 2. A **deposit fee**, sized by a **tiered fee schedule** that depends on the deposit amount, paid to a **fee recipient address that is fixed at deploy time**.
@@ -39,7 +37,7 @@
 - Deploying on chains other than Base (the deployment method supports it; the v1.0 rollout doesn't do it).
 - Assets other than USDC (USDS, WETH, cbBTC, EURC, …). Adding one means a new release with per-asset fee tiers.
 - Swaps or zaps (e.g. depositing ETH into a USDC vault).
-- Router-managed async withdrawals (ERC-7540 request/claim flows). See YO in §8.
+- Router-managed async withdrawals (ERC-7540 request/claim flows). No v1 pool needs one; §4.3 guards against vaults that queue redeems.
 - Oracle-priced (USD) fee tiers.
 - Withdrawal fees, performance fees, on-chain referral payouts (the referral code is tracking only, §4.7). Our own referral code in Spark's program is deferred to a later release.
 - End-user access control (allowlists, KYC gating). Anyone can use the router. Any screening the product needs happens in the frontend, not on-chain.
@@ -75,7 +73,7 @@ flowchart LR
     U[User wallet<br/>EOA / Smart Wallet] -- approve --> T[(USDC / share token / aToken)]
     U -- deposit / withdraw --> R[RestakeRouter<br/>immutable, no owner]
     R -- fee --> F[FEE_RECIPIENT<br/>immutable]
-    R -- deposit / redeem --> V[ERC-4626 vaults<br/>Sky sUSDC, Morpho, Fluid, YO, AUTO, Veranta]
+    R -- deposit / redeem --> V[ERC-4626 vaults<br/>Sky sUSDC, Morpho, Fluid, Veranta]
     R -- supply / withdraw --> A[Aave V3 Pool]
     V -- shares --> U
     A -- aTokens --> U
@@ -151,7 +149,7 @@ sequenceDiagram
 
 Design choice: the router **pulls the shares and redeems as owner**, rather than calling `redeem(shares, receiver, owner=user)` and relying on the vault's allowance logic. This behaves the same for every vault, makes the balance-delta checks simple, and avoids edge cases in how vaults implement allowances.
 
-`minAssets` must be > 0. If a vault queues the redeem instead of paying out (YO without idle liquidity, §8), the receiver's balance delta is below `minAssets` and the whole transaction reverts, so shares are never stuck in a queue owned by the router.
+`minAssets` must be > 0. If a vault queues the redeem instead of paying out (async ERC-7540-style vaults; none in v1), the receiver's balance delta is below `minAssets` and the whole transaction reverts, so shares are never stuck in a queue owned by the router.
 
 ### 4.4 Withdraw (Aave V3)
 
@@ -169,7 +167,7 @@ Passing `shares == type(uint256).max` means "withdraw my whole balance". The rou
 | Wallet type | Flow |
 |---|---|
 | Smart wallets (Coinbase Smart Wallet, Safe, 7702-delegated EOAs) | `wallet_sendCalls` (EIP-5792) with `[approve, deposit]` in **one user confirmation**. |
-| Plain EOAs and MPC wallets (e.g. partner omnibus wallets) | **Deposit:** one transaction with `depositWithPermit`, using an off-chain EIP-2612 USDC signature. **Withdraw:** one transaction with `withdrawWithPermit`, using an EIP-2612 signature on the share token, for every pool except yoUSD and avUSDC, which have no permit and still need `approve` then `withdraw`. |
+| Plain EOAs and MPC wallets (e.g. partner omnibus wallets) | **Deposit:** one transaction with `depositWithPermit`, using an off-chain EIP-2612 USDC signature. **Withdraw:** one transaction with `withdrawWithPermit`, using an EIP-2612 signature on the share token, for every pool except avUSDC, which has no permit and still need `approve` then `withdraw`. |
 
 #### `depositWithPermit`
 
@@ -191,7 +189,7 @@ Design points:
 `withdrawWithPermit(pool, shares, minAssets, receiver, deadline, partnerUserRef, v, r, s)` calls `pool.permit(msg.sender, router, shares, deadline, v, r, s)` on the share token (or aToken), then runs the same code path as `withdraw`. The design points above carry over (owner is always `msg.sender`, shared deadline, failed permits ignored), with these differences:
 
 - **Full exit.** With `shares = type(uint256).max` the permit value is `type(uint256).max` too, so a rebasing aToken balance that grows between signing and execution is still covered. The leftover allowance is harmless: the router only ever pulls from `msg.sender`, so only the owner can use it.
-- **Per-pool support.** Each share token has its own EIP-712 domain and nonces. Checked on Base mainnet (Oct 2026): every v1 pool supports EIP-2612 except **yoUSD** and **avUSDC**, whose current implementations have no `permit`. For those, the permit call fails and is ignored, so callers approve first (a dummy signature is fine). Both are upgradeable proxies, so support can change.
+- **Per-pool support.** Each share token has its own EIP-712 domain and nonces. Checked on Base mainnet (Oct 2026): every v1 pool supports EIP-2612 except **avUSDC**, whose current implementation has no `permit`. For it, the permit call fails and is ignored, so callers approve first (a dummy signature is fine). It is an upgradeable proxy, so support can change.
 
 ### 4.7 Referral codes and partner user references
 
@@ -299,14 +297,16 @@ mapping(address pool => PoolState) private _poolState;
 | # | Protocol | Pool (key) | Type | Asset | Notes |
 |---|---|---|---|---|---|
 | 1 | Sky | sUSDC `0x3128a0f7f0ea68e7b7c9b00afa7e41045828e858` | ERC4626 | USDC | On-chain name **"Spark USDC Vault"** (symbol `sUSDC`): an ERC-4626 wrapper that routes USDC into sUSDS via PSM3, so the router treats it as a plain vault. `asset() == USDC`; shares have **18 decimals** (USDC has 6). `maxDeposit` is capped (~653K USDC of room at time of check). Withdrawals depend on PSM3 USDC liquidity. |
-| 2 | Morpho | 8 USDC vaults (6 Vault V2, 2 Vault V1): Steakhouse Prime `0xbeef0e0834849acc03f0089f01f4f1eeb06873c9`, Gauntlet Prime (V2) `0x050ce30b927da55177a4914ec73480238bad56f0`, Gauntlet Frontier `0x1deefabee758aabdc29a542b24ca3b75afd56765`, Steakhouse High Yield `0xbeeff7ae5e00aae3db302e4b0d8c883810a58100`, Grove x Steakhouse `0xbeef0786756810478b88982de00f3cd7fdb8e7c7`, Clearstar cbAssets `0x91c056b6d4311a743614fbc03ac32d4e6a2d3a3c`, Gauntlet USDC Prime (V1) `0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61`, Spark USDC Vault (V1) `0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a` | ERC4626 | USDC | All shares have 18 decimals. For Vault V2, confirm that no deposit/receive gates are set (they would block the router or the receiver). The Morpho "Spark USDC Vault" is a different contract from Sky's sUSDC (#1). |
+| 2 | Morpho | 6 USDC Vault V2 vaults: Steakhouse Prime `0xbeef0e0834849acc03f0089f01f4f1eeb06873c9`, Gauntlet Prime (V2) `0x050ce30b927da55177a4914ec73480238bad56f0`, Gauntlet Frontier `0x1deefabee758aabdc29a542b24ca3b75afd56765`, Steakhouse High Yield `0xbeeff7ae5e00aae3db302e4b0d8c883810a58100`, Grove x Steakhouse `0xbeef0786756810478b88982de00f3cd7fdb8e7c7`, Clearstar cbAssets `0x91c056b6d4311a743614fbc03ac32d4e6a2d3a3c` | ERC4626 | USDC | All shares have 18 decimals. Confirm that no deposit/receive gates are set (they would block the router or the receiver). |
 | 3 | Fluid | fUSDC `0xf42f5795d9ac7e9d757db633d693cd548cfd9169` | ERC4626 | USDC | 6 decimals. |
 | 4 | Aave V3 | aBasUSDC `0x4e65fe4dba92790696d040ac24aa414708f5c0ab` | AAVE_V3 | USDC | Aave Pool `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` (verify). |
-| 5 | YO Protocol | yoUSD `0x0000000f2eb9f69274678c76222b35eec7588a65` | ERC4626 | USDC | On-chain: name/symbol `yoUSD`, `asset() == USDC`, 6 decimals, `maxDeposit` uncapped. Redeem is async without idle liquidity (§8). YO Gateway `0xF1EeE0957267b1A474323Ff9CfF7719E964969FA` (per Base docs, verify). |
-| 6 | AUTO Finance | baseUSD Autopool `0x9c6864105aec23388c89600046213a44c384c831` | ERC4626 | USDC | Formerly Tokemak: the on-chain name is still **"Tokemak baseUSD"** (symbol `baseUSD`). `asset() == USDC`; shares have **18 decimals** (USDC has 6). `maxDeposit` effectively uncapped. |
-| 7 | Veranta | avUSDC `0x944766f715b51967e56afde5f0aa76ceacc9e7f9` | ERC4626 | USDC | Formerly Avantis: the on-chain name is still **"Avantis USDC Vault"** (symbol `avUSDC`). `asset() == USDC`, 6 decimals, `maxDeposit` is capped (finite). Confirm withdrawal behavior (`maxWithdraw` / `maxRedeem`, any lock or epoch). |
+| 5 | Veranta | avUSDC `0x944766f715b51967e56afde5f0aa76ceacc9e7f9` | ERC4626 | USDC | Formerly Avantis: the on-chain name is still **"Avantis USDC Vault"** (symbol `avUSDC`). `asset() == USDC`, 6 decimals, `maxDeposit` is capped (finite). Confirm withdrawal behavior (`maxWithdraw` / `maxRedeem`, any lock or epoch). |
 
 USDC on Base: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (native USDC, not bridged USDbC).
+
+Veranta is the one intentionally high-risk venue: its yield comes from DEX trading activity, not overcollateralized lending. Every other pool is a lending or savings venue.
+
+**Evaluated and dropped before deployment (Nov 2026):** YO Protocol `yoUSD` and AUTO Finance `baseUSD` (small TVL, extra protocol exposure, and integration quirks: YO's async redeem and missing permit, AUTO's non-`view` `previewRedeem` and unwind slippage, for no meaningful yield over the Morpho vaults), and the two Morpho Vault V1 vaults (Gauntlet USDC Prime, Spark USDC Vault), since Morpho is listed through Vault V2 only.
 
 ### 5.2 Fee tiers
 
@@ -554,7 +554,7 @@ Notes for the indexer:
 - `feeBps` and `tierIndex` are recorded at deposit time, so fee analytics don't need to join against the tier table.
 - `asset` is always `USDC` in v1.0. It stays in `Deposit` and `Withdraw` so the same subgraph schema works for later releases that support more assets.
 - Suggested subgraph entities: `Router`, `User`, `Pool`, `Position (user × pool)`, `DepositEvent`, `WithdrawEvent`, `FeeTierSnapshot`, `DailyPoolStats`, `ProtocolStats`.
-- Positions from the events are **router-flow only**. Users can also move shares outside the router (direct vault deposits, transfers, YO async redeems through the YO Gateway). If the product needs exact balances, the subgraph should also index the share tokens' `Transfer` events for known pools.
+- Positions from the events are **router-flow only**. Users can also move shares outside the router (direct vault deposits, direct protocol redeems, transfers). If the product needs exact balances, the subgraph should also index the share tokens' `Transfer` events for known pools.
 
 ---
 
@@ -563,18 +563,16 @@ Notes for the indexer:
 | Protocol | Interface | Notes / checks before listing |
 |---|---|---|
 | Sky | ERC-4626 (Spark `sUSDC`) | Spark's vault wraps USDC into sUSDS through PSM3, so the router treats it as a plain vault. Shares have 18 decimals (USDC has 6). Deposits are capped by `maxDeposit`; withdrawals depend on the PSM3's USDC balance (topped up by the Spark Liquidity Layer), so `redeem` can revert if it's short. Spark's referral program is out of scope for v1.0. |
-| Morpho | ERC-4626 | Synchronous. Liquidity depends on the curator's market allocation, so `redeem` can revert if the underlying markets are fully utilized. **Vault V2 returns 0 from `maxDeposit` / `maxMint` / `maxWithdraw` / `maxRedeem` by design**, so the frontend must not use them to size or gate actions for V2 vaults. The fork test confirmed that all four gates are unset on the six V2 vaults. |
+| Morpho | ERC-4626 (Vault V2) | Synchronous. Liquidity depends on the curator's market allocation, so `redeem` can revert if the underlying markets are fully utilized. **Vault V2 returns 0 from `maxDeposit` / `maxMint` / `maxWithdraw` / `maxRedeem` by design**, so the frontend must not use them to size or gate actions for V2 vaults. The fork test confirmed that all four gates are unset on all six vaults. |
 | Fluid | ERC-4626 | Synchronous. Check the withdrawal limits in Fluid's liquidity layer (gradual withdrawal limits can cap large redeems). |
 | Aave V3 | `IPool.supply / withdraw` | aTokens rebase, so use balance deltas and support "withdraw all" (§4.5). Watch supply caps on deposit and utilization on withdraw. |
-| YO Protocol | ERC-4626 with async redeem (verified `YoVault` source, implementation `0xc84a6e01bff58996540f1abc22355a9dfe0d78dc`) | **Direct deposits are allowed:** vault `deposit(assets, receiver)` is public, gated only by `whenNotPaused` (no Gateway-only or allowlist check); YO's individual-contracts guide documents it. Shares are priced by YO's oracle, not `totalAssets/totalSupply`. **`redeem` doesn't revert without liquidity:** it delegates to `requestRedeem`, which requires `owner == msg.sender` (fine, since the router redeems its own pulled shares). It's all-or-nothing: if the vault's idle USDC minus `totalPendingAssets` covers the whole redeem, it pays out instantly and returns the asset amount; otherwise it moves the shares into the vault, records a pending request keyed by `receiver`, and **returns 0**. An operator later calls `fulfillRedeem` (YO docs: within ~24h). So the router's `minAssets > 0` check (§4.3) catches the 0-asset outcome and reverts, undoing the queue; the frontend then falls back to the YO Gateway with the user as owner. Also: `withdraw()` always reverts (`UseRequestRedeem`), so the router must use `redeem`; the return value is the amount before YO's withdrawal fee (the router uses balance deltas anyway); admin can set deposit/withdraw fees below 10% and pause the vault. At time of check: deposit fee 0, withdrawal fee 0.001%, ~157.7K USDC idle, nothing pending. |
-| AUTO Finance | ERC-4626 (Autopool) | Autopools rebalance across DEXs and lending markets. Redeem is synchronous but unwinds positions, so the amount out can be below `previewRedeem`; the frontend should size `minAssets` with a tolerance. Check for deposit restrictions and the profit-unlock mechanism's effect on share price. **`previewRedeem` is not `view`:** it simulates the redeem with a state-changing self-call, so it reverts under STATICCALL, including through the router's `previewWithdraw`. The frontend quotes AUTO withdrawals by `eth_call`ing the Autopool's `previewRedeem` directly. `previewDeposit` is unaffected. |
 | Veranta | ERC-4626 (`avUSDC`) | Formerly Avantis; the vault still carries the Avantis name on-chain. Confirm full ERC-4626 compliance, withdrawal behavior (`maxWithdraw` / `maxRedeem`, any lock or epoch), fee-on-deposit behavior, and that `deposit` returns the shares actually minted. **Exit fee:** at block 53,190,000, `previewRedeem` returned ~1.48% less than `convertToAssets`. The router passes the fee through correctly (it measures balance deltas), but users lose it on exit, and the frontend should surface it. |
 
 **Onboarding checklist for every pool (done before the deployment that includes it):**
 1. Verify the address against the protocol's official docs or registry.
 2. Run fork tests for deposit, partial withdraw and full withdraw through the router.
 3. Confirm the pool's underlying is native USDC (`asset()` / `UNDERLYING_ASSET_ADDRESS()`).
-4. Confirm the redeem path is synchronous, or that its async fallback is handled outside the router (YO).
+4. Confirm the redeem path is synchronous. An async vault would need its fallback handled outside the router (§4.3).
 5. Confirm there are no deposit or transfer hooks that break pull-then-redeem (e.g. transfer restrictions or allowlists on share tokens).
 6. Review the protocol's audits and admin powers (pause, fee changes, upgradeability).
 
@@ -644,7 +642,7 @@ A CREATE2 address is `keccak(factory, salt, keccak(initCode))`, and `initCode` i
 
 ### Constructor config file
 
-There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited. The exception is `constructor-config.v1-test.json`: the same constructor arguments under its own salt label (`restake.router.v1.0-test.2`; bump the suffix for each new rehearsal, since CREATE3 addresses depend only on the salt), for a rehearsal deploy that can't claim the production address. A unit test keeps it in sync with v1.
+There is one file per release: `script/config/constructor-config.v<major>.json`. A release with a new salt, or with changed constructor arguments, gets a new file, and a deployed release's file is never edited. The exception is `constructor-config.v1-test.json`: the same constructor arguments under its own salt label (`restake.router.v1.0-test.3`; bump the suffix for each new rehearsal, since CREATE3 addresses depend only on the salt), for a rehearsal deploy that can't claim the production address. A unit test keeps it in sync with v1.
 
 | Path | Meaning |
 |---|---|
@@ -714,7 +712,7 @@ restake-router-defi/
 | Constructor | Fee tier validation (empty, unsorted, first ≠ 0, above cap, > MAX_TIERS); pool checks for both types; non-USDC pool rejected; duplicate pools; missing Aave Pool for `AAVE_V3` pools; config events emitted. |
 | Deployment | Same address predicted and deployed via CreateX on a fork; a different deployer can't use the salt. |
 | Deposit | Each pool on a Base fork: happy path, `receiver ≠ sender`, slippage revert, disabled revert, deadline revert. |
-| Withdraw | Partial, full (`max`), aToken rebasing dust, Sky `sUSDC` redeem with PSM3 short on USDC, YO queued redeem reverts, works while deposits are disabled, slippage revert. |
+| Withdraw | Partial, full (`max`), aToken rebasing dust, Sky `sUSDC` redeem with PSM3 short on USDC, async-vault queued redeem reverts (mock), works while deposits are disabled, slippage revert. |
 | Guardian | Only the guardian can disable; nothing can re-enable; withdrawals unaffected. |
 | Invariants | The router's token balances stay 0 and the router's allowances stay 0 across random action sequences. |
 | Events | Exact field assertions with `vm.expectEmit`, including `referralCode` and `partnerUserRef` (zero and non-zero). |

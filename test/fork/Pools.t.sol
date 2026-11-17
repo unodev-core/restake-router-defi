@@ -17,7 +17,6 @@ contract PoolsForkTest is BaseForkTest {
 
     address internal constant SKY_SUSDC = 0x3128a0F7f0ea68E7B7c9B00AFa7E41045828e858;
     address internal constant A_BAS_USDC = 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB;
-    address internal constant YO_USD = 0x0000000f2eB9f69274678c76222B35eEc7588a65;
 
     // ───────────── Round trips, one per pool (index into config `pools[]`) ─────────────
 
@@ -49,33 +48,17 @@ contract PoolsForkTest is BaseForkTest {
         _roundTrip(6, 0.01e18);
     }
 
-    function test_roundTrip_07_Morpho_GauntletPrimeV1() public {
+    function test_roundTrip_07_Fluid_fUSDC() public {
         _roundTrip(7, 0.01e18);
     }
 
-    function test_roundTrip_08_Morpho_SparkUsdcV1() public {
+    function test_roundTrip_08_Aave_aBasUSDC() public {
         _roundTrip(8, 0.01e18);
     }
 
-    function test_roundTrip_09_Fluid_fUSDC() public {
-        _roundTrip(9, 0.01e18);
-    }
-
-    function test_roundTrip_10_Aave_aBasUSDC() public {
-        _roundTrip(10, 0.01e18);
-    }
-
-    function test_roundTrip_11_YO_yoUSD() public {
-        _roundTrip(11, 0.01e18);
-    }
-
-    function test_roundTrip_12_AUTO_baseUSD() public {
-        _roundTrip(12, 0.01e18);
-    }
-
-    function test_roundTrip_13_Veranta_avUSDC() public {
+    function test_roundTrip_09_Veranta_avUSDC() public {
         // avUSDC's previewRedeem charges an exit fee (~1.48% at the pinned block, §8).
-        _roundTrip(13, 0.02e18);
+        _roundTrip(9, 0.02e18);
     }
 
     /// @param maxLoss Max round-trip loss vs the net deposit (1e18 = 100%), covering vault-side fees and slippage.
@@ -134,20 +117,6 @@ contract PoolsForkTest is BaseForkTest {
         assertApproxEqAbs(assets, balance, 1);
         assertEq(IERC20(A_BAS_USDC).balanceOf(alice), 0, "user dust");
         _assertRouterClean();
-    }
-
-    /// @dev YO without idle liquidity queues the redeem and returns 0; the router must revert the whole tx.
-    function test_yo_queuedRedeemReverts() public {
-        (uint256 shares,) = _depositAs(alice, YO_USD, AMOUNT);
-        deal(address(usdc), YO_USD, 0); // no idle USDC
-
-        vm.startPrank(alice);
-        IERC20(YO_USD).approve(address(router), shares);
-        vm.expectRevert(abi.encodeWithSelector(IRestakeRouter.SlippageExceeded.selector, 0, 1));
-        router.withdraw(YO_USD, shares, 1, alice, block.timestamp, bytes32(0));
-        vm.stopPrank();
-
-        assertEq(IERC20(YO_USD).balanceOf(alice), shares, "shares stay with the user");
     }
 
     /// @dev Spark sUSDC pays out from PSM3. With PSM3 short on USDC the redeem must revert, not leave shares behind.
